@@ -1,0 +1,9 @@
+.DS_Store
+build/
+dist/
+third_party/
+*.raw
+# local notes and reverse-engineering logs (device identifiers): not published
+CLAUDE.md
+research/
+archive/
