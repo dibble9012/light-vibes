@@ -8,6 +8,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.LocalSocket;
 import android.net.LocalSocketAddress;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.text.InputType;
@@ -47,10 +48,16 @@ import java.util.Map;
  * built-in preset leaves a marker in files/hidden/, and restoring them removes the markers.
  */
 public class MainActivity extends Activity {
-    /* factory 64-colour custom wheel, same tables as lightvibesd.c: the only colours the lamp reliably accepts */
-    private static final int[] WHEEL_R = {16,16,16,33,47,64,82,100,120,136,155,169,183,193,204,213,221,228,235,239,246,250,254,255,255,255,255,255,255,255,255,255,255,255,254,255,246,233,220,202,166,168,149,132,117,104,93,81,71,62,53,44,37,30,25,20,16,16,16,16,16,16,16,16};
-    private static final int[] WHEEL_G = {67,46,32,28,28,28,28,28,28,29,33,35,35,33,31,27,23,19,14,10,6,4,1,50,68,80,105,120,143,166,195,205,218,232,243,255,255,255,255,252,226,243,235,229,223,221,222,225,231,238,245,250,250,250,250,250,244,230,210,187,163,138,111,89};
-    private static final int[] WHEEL_B = {244,242,239,239,239,239,239,239,239,239,239,239,234,224,210,192,174,153,153,116,96,81,69,29,35,39,48,53,62,70,88,118,158,200,230,255,246,221,188,147,91,98,98,98,98,98,105,118,133,152,169,189,207,225,237,249,252,252,252,252,252,252,252,248};
+    /* factory 64-colour custom wheels (Kia EV6 & Hyundai Ioniq 5), same tables as lightvibesd.c: the only colours the lamp reliably accepts */
+    private static final int[] KIA_R = {16,16,16,33,47,64,82,100,120,136,155,169,183,193,204,213,221,228,235,239,246,250,254,255,255,255,255,255,255,255,255,255,255,255,254,255,246,233,220,202,166,168,149,132,117,104,93,81,71,62,53,44,37,30,25,20,16,16,16,16,16,16,16,16};
+    private static final int[] KIA_G = {67,46,32,28,28,28,28,28,28,29,33,35,35,33,31,27,23,19,14,10,6,4,1,50,68,80,105,120,143,166,195,205,218,232,243,255,255,255,255,252,226,243,235,229,223,221,222,225,231,238,245,250,250,250,250,250,244,230,210,187,163,138,111,89};
+    private static final int[] KIA_B = {244,242,239,239,239,239,239,239,239,239,239,239,234,224,210,192,174,153,153,116,96,81,69,29,35,39,48,53,62,70,88,118,158,200,230,255,246,221,188,147,91,98,98,98,98,98,105,118,133,152,169,189,207,225,237,249,252,252,252,252,252,252,252,248};
+
+    private static final int[] HYUNDAI_R = {176,195,205,232,255,255,255,255,255,255,255,255,254,255,254,254,255,255,255,255,255,255,255,254,255,255,255,255,255,255,255,255,255,254,255,254,247,230,210,175,119,58,10,0,0,0,0,0,0,0,0,0,25,55,81,100,109,122,125,128,130,143,156,167};
+    private static final int[] HYUNDAI_G = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,96,107,73,88,113,125,3,34,48,60,65,137,148,160,172,177,191,207,216,237,255,254,255,254,254,255,255,217,180,161,140,125,115,99,85,62,0,0,0,0,42,52,25,0,0,0,0,0};
+    private static final int[] HYUNDAI_B = {255,254,254,254,241,195,158,137,117,111,106,101,95,72,58,30,106,116,73,88,113,115,10,0,23,42,49,107,119,111,113,108,123,138,147,165,182,186,188,191,196,198,235,245,255,255,255,255,254,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255};
+
+    private static int[] WHEEL_R = KIA_R, WHEEL_G = KIA_G, WHEEL_B = KIA_B;
 
     private static final String DEFAULT_BANDS = "30-150:22:1 150-500:28:2 500-2000:44:4 2000-6000:56:10 6000-16000:8:30";
     private static final String[] BUILT_IN = {"lively", "marigold", "contrast", "pulse3", "glow", "epic", "speed"};
@@ -177,6 +184,7 @@ public class MainActivity extends Activity {
 
     private void loadCurrent() {
         settingsDir.mkdirs();
+        updatePalette();
         cfg.clear();
         String[] names = settingsDir.list();
         if (names != null) {
@@ -193,11 +201,70 @@ public class MainActivity extends Activity {
             modified = a.endsWith("*");
         }
         if (cfg.isEmpty()) applyPreset(FIRST_RUN_PRESET);
+        else if (!modified && active.startsWith("b:")) applyPreset(active);
     }
 
-    /** enabled and debug belong to the car, not to a preset. */
+    /** enabled, debug and palette belong to the car, not to a preset. */
     private static boolean isSwitchFile(String n) {
-        return n.equals("enabled") || n.equals("debug");
+        return n.equals("enabled") || n.equals("debug") || n.equals("palette");
+    }
+
+    private static String matchMake(String s) {
+        if (s == null) return null;
+        String l = s.toLowerCase();
+        if (l.contains("neev") || l.contains("ceev") || l.contains("ioniq") || l.contains("ecohmc") || l.contains("hyundai")) return "hyundai";
+        if (l.contains("cvev") || l.contains("dl3") || l.contains("ev6") || l.contains("ecokia") || l.contains("kia")) return "kia";
+        return null;
+    }
+
+    private void updatePalette() {
+        String p = readFirstLine(new File(settingsDir, "palette"));
+        String make = ("hyundai".equals(p) || "kia".equals(p)) ? p : null;
+        if (make == null) {
+            String[] buildFields = {Build.PRODUCT, Build.DEVICE, Build.MODEL, Build.FINGERPRINT};
+            for (String f : buildFields) {
+                make = matchMake(f);
+                if (make != null) break;
+            }
+        }
+        if (make == null) {
+            BufferedReader r = null;
+            try {
+                r = new BufferedReader(new FileReader("/system/build.prop"));
+                String line;
+                String[] keys = {"ro.build.product=", "ro.product.device=", "ro.product.name=", "ro.product.model=", "ro.build.fingerprint=", "ro.mobis.onebindir="};
+                while ((line = r.readLine()) != null && make == null) {
+                    String l = line.toLowerCase();
+                    for (String k : keys) {
+                        if (l.startsWith(k)) {
+                            make = matchMake(l.substring(k.length()));
+                            if (make != null) break;
+                        }
+                    }
+                }
+            } catch (IOException ignored) {
+            } finally {
+                if (r != null) try { r.close(); } catch (IOException ignored) { }
+            }
+        }
+        if (make == null) {
+            BufferedReader r = null;
+            try {
+                r = new BufferedReader(new FileReader("/data/hmgapi/settings/hmgapi.json"));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = r.readLine()) != null) sb.append(line).append('\n');
+                make = matchMake(sb.toString());
+            } catch (IOException ignored) {
+            } finally {
+                if (r != null) try { r.close(); } catch (IOException ignored) { }
+            }
+        }
+        if ("hyundai".equals(make)) {
+            WHEEL_R = HYUNDAI_R; WHEEL_G = HYUNDAI_G; WHEEL_B = HYUNDAI_B;
+        } else {
+            WHEEL_R = KIA_R; WHEEL_G = KIA_G; WHEEL_B = KIA_B;
+        }
     }
 
     private static String readFirstLine(File f) {
@@ -691,7 +758,7 @@ public class MainActivity extends Activity {
     private static int unusedColour(List<Band> bands, int from) {
         for (int k = 1; k < 64; k++) {
             int c = (from + k * 8) % 64;
-            if (c >= 32 && c <= 38) continue;
+            if (pale(c)) continue;
             boolean used = false;
             for (Band b : bands) if (intOf(b.colour, -1) == c) used = true;
             if (!used) return c;
@@ -1061,7 +1128,7 @@ public class MainActivity extends Activity {
             tiles.add(slider("Colour smoothing", "Lower reacts faster, higher is calmer", "band_smoothing_ms", 120, 0, 600, 10, " ms"));
             tiles.add(slider("Colour stickiness", "How much louder a new band must get (white line)", "switch_margin", 30, 0, 200, 5, "%"));
         }
-        tiles.add(slider("Fastest light change", "Shortest time between changes", "min_interval_ms", 250, 150, 1000, 10, " ms"));
+        tiles.add(slider("Fastest light change", "Shortest time between changes", "min_interval_ms", 100, 50, 1000, 10, " ms"));
         if (!pulse) tiles.add(slider("Brightness swing", "Lower makes brightness more dramatic", "loudness_range_db", 12, 3, 24, 1, " dB"));
         addHeading("Light");
         addGrid(tiles);

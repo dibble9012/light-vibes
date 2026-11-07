@@ -18,7 +18,9 @@ SDK=${ANDROID_HOME:-/opt/homebrew/share/android-commandlinetools}
 BT=$(ls -d "$SDK"/build-tools/* | sort -V | tail -1)
 ANDROID_JAR=$SDK/platforms/android-19/android.jar
 AUTHOR_KEY=${HMGAPI_KEY:-$HOME/.hmgapi/author.key}
-HMGAPI_DIR=${HMGAPI_DIR:-../HMG-API}    # a checkout of github.com/VysseCodes/HMG-API, for tools/mknemesismod.sh
+if [ -z "${HMGAPI_DIR:-}" ]; then
+    if [ -d third_party/HMG-API ]; then HMGAPI_DIR=third_party/HMG-API; else HMGAPI_DIR=../HMG-API; fi
+fi
 APP_KEYSTORE=$HOME/.hmgapi/light-vibes-app.keystore
 
 if [ ! -d "$TINY" ]; then
@@ -65,7 +67,7 @@ echo "== mod"
 M=build/mod
 rm -rf $M
 mkdir -p $M/app $M/defaults
-cp mod/mod.json mod/lights.sh build/lightvibesd $M/
+cp mod/mod.json mod/lights.sh mod/open.sh build/lightvibesd $M/
 cp $A/LightVibes.apk $M/app/
 python3 tools/make_icons.py $M/icons
 # defaults until the app has been opened: the lively preset, one value per file

@@ -4,16 +4,17 @@ Makes the head unit's ambient lighting follow the music, or the car's speed. Col
 react to the beat and to the sound's frequency bands, with no microphone. When the music stops, or
 Siri or a phone call comes in, your own colour and brightness come back.
 
-**[Download the latest release](https://github.com/dibble9012/light-vibes/releases/latest)**
+**[Download the latest release](https://github.com/lemoyneiv/light-vibes/releases/latest)**
 
-Tested on a 2023 Kia EV6 GT-Line (USA), firmware 260507. This is an early version, and some parts
+Tested on the Kia EV6, Hyundai Ioniq 5, and Hyundai Ioniq 6 (USA Gen5W), auto-detecting the
+vehicle's factory 64-colour ambient light palette at runtime. This is an early version, and some parts
 haven't been tried on the car yet: see [What's been tested](#whats-been-tested).
 
 ## Install
 
 You need HMG-API 1.0.0 or later on the car first. Both methods use a USB flash drive. Download
 the file for your method from the
-[latest release](https://github.com/dibble9012/light-vibes/releases/latest), listed under **Assets**.
+[latest release](https://github.com/lemoyneiv/light-vibes/releases/latest), listed under **Assets**.
 
 ADB over USB has to be off, or the port can't read the drive.
 
@@ -42,7 +43,9 @@ Manager.
 
 ## Using it
 
-Open the **Light Vibes** tile. Every change applies right away.
+Open the **Light Vibes** tile on the home screen, or tap **Launch** on **Light Vibes** in NEMESIS Manager
+(on cars where HMG-API does not have a built-in hook map yet, such as the Ioniq 6, you can also enable the
+home screen tile via **HMG-API -> Settings -> Hook map -> Map this car from its files**, then **Check the map on this car** and restart). Every change applies right away.
 
 - **On/Off** switches the effect off without uninstalling the mod.
 - **Presets:** Lively (the default), Marigold, Contrast, Bold Flash, Glow, Epic and Speed. Tap one to
@@ -109,8 +112,10 @@ Not tried on the car yet:
 - **Lamp control** (`service call com.hkmc.micom.system`, `com.hkmc.micom.ISystemService`):
   `76` requestSMLStatus, `77` setSMLConfiguration(mode, data) with mode 5 for brightness and mode 9 for
   drive-mode-linked colour, and `78` setSMLRGB(byte[2] r, byte[2] g, byte[2] b). The lamp only reliably
-  accepts its factory colours, so the app offers those 64. Custom colours are ignored while drive-mode
-  colour is on, so the service turns it off while it drives the lamp and restores it afterwards.
+  accepts its factory 64-colour custom wheel, which differs between Kia and Hyundai (`VehicleSettings.apk`);
+  both `lightvibesd` and the app auto-detect the vehicle palette (`kia` or `hyundai`, overridable via a
+  `palette` setting file). Custom colours are ignored while drive-mode colour is on, so the service turns
+  it off while it drives the lamp and restores it afterwards.
 - **Analysis.** A 2048-point FFT every 1024 samples, for beats, bands and loudness.
 - **Speed.** Every 500 ms the service asks HMG-API's vehicle service for `speed`, then walks around
   the colour wheel between your two colours, leaving out the pale ones.

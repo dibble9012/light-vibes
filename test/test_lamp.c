@@ -7,41 +7,45 @@
 static void write_file(const char *p, const char *s) { FILE *f = fopen(p, "w"); assert(f); fputs(s, f); fclose(f); }
 
 int main(void) {
-    C.speed_low = 0; C.speed_high = 80; C.speed_color_low = 44; C.speed_color_high = 22;
-    snprintf(C.speed_unit, sizeof C.speed_unit, "mph");
+    for (int p = 0; p < 2; p++) {
+        set_palette(p ? "hyundai" : "kia");
+        C.speed_low = 0; C.speed_high = 80; C.speed_color_low = 44; C.speed_color_high = 22;
+        snprintf(C.speed_unit, sizeof C.speed_unit, "mph");
 
-    /* ends and clamping */
-    assert(speed_wheel_index(0) == 44);
-    assert(speed_wheel_index(80 * KMH_PER_MPH) == 22);
-    assert(speed_wheel_index(200) == 22);
-    /* the fade never lands on a pale colour, and moves one way only */
-    int prev = 44;
-    for (int mph = 0; mph <= 80; mph++) {
-        int i = speed_wheel_index(mph * KMH_PER_MPH);
-        assert(!wheel_pale(i) && i <= prev && i >= 22);
-        prev = i;
+        /* ends and clamping */
+        assert(speed_wheel_index(0) == 44);
+        assert(speed_wheel_index(80 * KMH_PER_MPH) == 22);
+        assert(speed_wheel_index(200) == 22);
+        /* the fade never lands on a pale colour, and moves one way only */
+        int prev = 44;
+        for (int mph = 0; mph <= 80; mph++) {
+            int i = speed_wheel_index(mph * KMH_PER_MPH);
+            assert(!wheel_pale(i) && i <= prev && i >= 22);
+            prev = i;
+        }
+        /* no speed range sits on one colour: 45 steps of speed share out the non-pale colours */
+        int same = 0, longest = 0; prev = -1;
+        for (int mph = 0; mph <= 80; mph++) {
+            int i = speed_wheel_index(mph * KMH_PER_MPH);
+            same = i == prev ? same + 1 : 1; prev = i;
+            if (same > longest) longest = same;
+        }
+        assert(longest <= 8);
+        /* the short way round passes through the top of the wheel */
+        C.speed_color_low = 60; C.speed_color_high = 4;
+        int mid = speed_wheel_index(40 * KMH_PER_MPH);
+        assert(mid >= 60 || mid <= 4);
+        /* a pale colour the user picked is kept */
+        C.speed_color_low = 35; C.speed_color_high = 22;
+        assert(speed_wheel_index(0) == 35);
+        /* km/h, and low == high */
+        snprintf(C.speed_unit, sizeof C.speed_unit, "kmh");
+        C.speed_color_low = 44; C.speed_color_high = 22; C.speed_high = 100;
+        assert(speed_wheel_index(100) == 22);
+        C.speed_low = C.speed_high = 50;
+        assert(speed_wheel_index(49) == 44 && speed_wheel_index(50) == 22);
     }
-    /* no speed range sits on one colour: 45 steps of speed share out the 15 non-pale colours */
-    int same = 0, longest = 0; prev = -1;
-    for (int mph = 0; mph <= 80; mph++) {
-        int i = speed_wheel_index(mph * KMH_PER_MPH);
-        same = i == prev ? same + 1 : 1; prev = i;
-        if (same > longest) longest = same;
-    }
-    assert(longest <= 8);
-    /* the short way round passes through the top of the wheel */
-    C.speed_color_low = 60; C.speed_color_high = 4;
-    int mid = speed_wheel_index(40 * KMH_PER_MPH);
-    assert(mid >= 60 || mid <= 4);
-    /* a pale colour the user picked is kept */
-    C.speed_color_low = 35; C.speed_color_high = 22;
-    assert(speed_wheel_index(0) == 35);
-    /* km/h, and low == high */
-    snprintf(C.speed_unit, sizeof C.speed_unit, "kmh");
-    C.speed_color_low = 44; C.speed_color_high = 22; C.speed_high = 100;
-    assert(speed_wheel_index(100) == 22);
-    C.speed_low = C.speed_high = 50;
-    assert(speed_wheel_index(49) == 44 && speed_wheel_index(50) == 22);
+    set_palette("kia");
 
     /* replies from the vehicle service */
     double v = -1;
@@ -66,6 +70,16 @@ int main(void) {
     assert(base.valid && base.r == 16 && base.g == 32 && base.b == 239 && base.bright_raw == 11);
     saved_write(0);
     assert(saved_load(s) && s[5] == 0);
+
+    /* palette auto-detection */
+    snprintf(C.palette, sizeof C.palette, "auto");
+    build_prop_path = path;
+    write_file(path, "ro.product.manufacturer=HYUNDAI MOBIS\nro.build.product=CVEV.USA.S5W_M.V009.001.260507\n");
+    assert(!strcmp(detect_palette(), "kia"));
+    write_file(path, "ro.product.manufacturer=HYUNDAI MOBIS\nro.build.product=NEEV.USA.S5W_M.V009.001.260507\n");
+    assert(!strcmp(detect_palette(), "hyundai"));
+    write_file(path, "ro.product.device=wp_daudioplus_neev23se_us\n");
+    assert(!strcmp(detect_palette(), "hyundai"));
     remove(path);
 
     puts("lamp tests passed");

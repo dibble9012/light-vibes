@@ -42,6 +42,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -52,12 +53,12 @@
 #include <unistd.h>
 #include <tinyalsa/asoundlib.h>
 
-#define VERSION "0.5.0"
+#define VERSION "0.5.1"
 #define MAX_RATE 48000
 static int rate = MAX_RATE;   /* the capture side only runs at the rate playback is using */
 #define SOURCE_START_MS 2000  /* Android-mixer audio must last this long: it also carries short system sounds */
 #define CH 2
-#define PERIOD 1024                 /* 21.3 ms per analysis step */
+#define PERIOD 512                  /* 10.7 ms per analysis step at 48 kHz */
 #define NFFT 2048
 #define BIN_HZ ((double)rate / NFFT)
 #define BLOCK_MS (1000.0 * PERIOD / rate)
@@ -65,10 +66,19 @@ static int rate = MAX_RATE;   /* the capture side only runs at the rate playback
 
 extern char **environ;
 
-/* ---------- factory 64-colour custom wheel (VehicleSettings ac.dOs/dOt/dOu, Kia) ---------- */
-static const unsigned char WHEEL_R[64] = {16,16,16,33,47,64,82,100,120,136,155,169,183,193,204,213,221,228,235,239,246,250,254,255,255,255,255,255,255,255,255,255,255,255,254,255,246,233,220,202,166,168,149,132,117,104,93,81,71,62,53,44,37,30,25,20,16,16,16,16,16,16,16,16};
-static const unsigned char WHEEL_G[64] = {67,46,32,28,28,28,28,28,28,29,33,35,35,33,31,27,23,19,14,10,6,4,1,50,68,80,105,120,143,166,195,205,218,232,243,255,255,255,255,252,226,243,235,229,223,221,222,225,231,238,245,250,250,250,250,250,244,230,210,187,163,138,111,89};
-static const unsigned char WHEEL_B[64] = {244,242,239,239,239,239,239,239,239,239,239,239,234,224,210,192,174,153,153,116,96,81,69,29,35,39,48,53,62,70,88,118,158,200,230,255,246,221,188,147,91,98,98,98,98,98,105,118,133,152,169,189,207,225,237,249,252,252,252,252,252,252,252,248};
+/* ---------- factory 64-colour custom wheels (Kia EV6 & Hyundai Ioniq 5 VehicleSettings) ---------- */
+static const unsigned char KIA_R[64] = {16,16,16,33,47,64,82,100,120,136,155,169,183,193,204,213,221,228,235,239,246,250,254,255,255,255,255,255,255,255,255,255,255,255,254,255,246,233,220,202,166,168,149,132,117,104,93,81,71,62,53,44,37,30,25,20,16,16,16,16,16,16,16,16};
+static const unsigned char KIA_G[64] = {67,46,32,28,28,28,28,28,28,29,33,35,35,33,31,27,23,19,14,10,6,4,1,50,68,80,105,120,143,166,195,205,218,232,243,255,255,255,255,252,226,243,235,229,223,221,222,225,231,238,245,250,250,250,250,250,244,230,210,187,163,138,111,89};
+static const unsigned char KIA_B[64] = {244,242,239,239,239,239,239,239,239,239,239,239,234,224,210,192,174,153,153,116,96,81,69,29,35,39,48,53,62,70,88,118,158,200,230,255,246,221,188,147,91,98,98,98,98,98,105,118,133,152,169,189,207,225,237,249,252,252,252,252,252,252,252,248};
+
+static const unsigned char HYUNDAI_R[64] = {176,195,205,232,255,255,255,255,255,255,255,255,254,255,254,254,255,255,255,255,255,255,255,254,255,255,255,255,255,255,255,255,255,254,255,254,247,230,210,175,119,58,10,0,0,0,0,0,0,0,0,0,25,55,81,100,109,122,125,128,130,143,156,167};
+static const unsigned char HYUNDAI_G[64] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,96,107,73,88,113,125,3,34,48,60,65,137,148,160,172,177,191,207,216,237,255,254,255,254,254,255,255,217,180,161,140,125,115,99,85,62,0,0,0,0,42,52,25,0,0,0,0,0};
+static const unsigned char HYUNDAI_B[64] = {255,254,254,254,241,195,158,137,117,111,106,101,95,72,58,30,106,116,73,88,113,115,10,0,23,42,49,107,119,111,113,108,123,138,147,165,182,186,188,191,196,198,235,245,255,255,255,255,254,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255};
+
+static const unsigned char *WHEEL_R = KIA_R, *WHEEL_G = KIA_G, *WHEEL_B = KIA_B;
+static const char *active_palette = "kia";
+static const char *build_prop_path = "/system/build.prop";
+static const char *hmgapi_json_path = "/data/hmgapi/settings/hmgapi.json";
 
 /* ---------- config ---------- */
 static const char *log_path = "/data/hmgapi/logs/light-vibes/lightvibesd.log";
@@ -78,6 +88,7 @@ typedef struct { int lo, hi, color; double gain; int r, g, b; } Band;   /* color
 static struct {
     char dir[256];
     int enabled, debug, dry;
+    char palette[16];           /* auto | kia | hyundai */
     char mode[16];              /* beat | spectrum | pulse | speed */
     int speed_low, speed_high, speed_color_low, speed_color_high;   /* speed mode: in speed_unit, wheel indexes */
     char speed_unit[8];         /* mph | kmh */
@@ -123,6 +134,69 @@ static void cfg_str(const char *k, char *out, size_t n, const char *def) {
 }
 static int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
+static void str_lower(char *s) {
+    for (; *s; s++) if (*s >= 'A' && *s <= 'Z') *s += 'a' - 'A';
+}
+static const char *match_make(const char *s) {
+    if (strstr(s, "neev") || strstr(s, "ceev") || strstr(s, "ioniq") || strstr(s, "ecohmc") || strstr(s, "hyundai")) return "hyundai";
+    if (strstr(s, "cvev") || strstr(s, "dl3") || strstr(s, "ev6") || strstr(s, "ecokia") || strstr(s, "kia")) return "kia";
+    return NULL;
+}
+static const char *detect_palette(void) {
+    if (!strcmp(C.palette, "hyundai") || !strcmp(C.palette, "kia")) return C.palette;
+    static const char *const keys[] = {
+        "ro.build.product=", "ro.product.device=", "ro.product.name=",
+        "ro.product.model=", "ro.build.fingerprint=", "ro.mobis.onebindir=", NULL
+    };
+    FILE *f = fopen(build_prop_path, "r");
+    if (f) {
+        char line[512];
+        while (fgets(line, sizeof line, f)) {
+            str_lower(line);
+            for (int i = 0; keys[i]; i++) {
+                size_t klen = strlen(keys[i]);
+                if (!strncmp(line, keys[i], klen)) {
+                    const char *m = match_make(line + klen);
+                    if (m) { fclose(f); return m; }
+                }
+            }
+        }
+        fclose(f);
+    }
+    f = fopen(hmgapi_json_path, "r");
+    if (f) {
+        char buf[2048];
+        size_t n = fread(buf, 1, sizeof buf - 1, f);
+        fclose(f);
+        buf[n] = 0; str_lower(buf);
+        const char *m = match_make(buf);
+        if (m) return m;
+    }
+    return "kia";
+}
+static void set_palette(const char *name) {
+    if (!strcmp(name, "hyundai")) {
+        WHEEL_R = HYUNDAI_R; WHEEL_G = HYUNDAI_G; WHEEL_B = HYUNDAI_B;
+        active_palette = "hyundai";
+    } else {
+        WHEEL_R = KIA_R; WHEEL_G = KIA_G; WHEEL_B = KIA_B;
+        active_palette = "kia";
+    }
+    for (int i = 0; i < C.nbands; i++) {
+        int col = C.bands[i].color;
+        if (col >= 0 && col < 64) {
+            C.bands[i].r = WHEEL_R[col];
+            C.bands[i].g = WHEEL_G[col];
+            C.bands[i].b = WHEEL_B[col];
+        }
+    }
+}
+static int palette_has_rgb(const unsigned char *r_tab, const unsigned char *g_tab, const unsigned char *b_tab, int r, int g, int b) {
+    for (int i = 0; i < 64; i++)
+        if (r_tab[i] == r && g_tab[i] == g && b_tab[i] == b) return 1;
+    return 0;
+}
+
 /* bands: "lo-hi:colour:boost ..." e.g. "40-150:22:1 150-500:28:1.5" (colour = wheel index 0-63) */
 static const char *DEFAULT_BANDS = "30-150:22:1 150-500:28:2 500-2000:44:4 2000-6000:56:10 6000-16000:8:30";
 static int parse_bands(const char *txt, Band *out) {
@@ -154,12 +228,14 @@ static const char *REPO_BANDS = "60-700:23:1.5 700-1000:28:0.2 1000-2000:38:0.9 
 static void load_config(const char *dir) {
     char d[sizeof C.dir]; snprintf(d, sizeof d, "%s", dir);   /* dir may be C.dir itself */
     snprintf(C.dir, sizeof C.dir, "%s", d);
+    cfg_str("palette", C.palette, sizeof C.palette, "auto");
+    set_palette(detect_palette());
     cfg_str("preset", C.preset, sizeof C.preset, "standard");
     int repo = !strcmp(C.preset, "repo");
     C.enabled = cfg_int("enabled", 1);
     C.debug = cfg_int("debug", 0);
     cfg_str("mode", C.mode, sizeof C.mode, repo ? "spectrum" : "beat");
-    C.min_interval_ms = clampi(cfg_int("min_interval_ms", 250), 150, 5000);
+    C.min_interval_ms = clampi(cfg_int("min_interval_ms", 100), 50, 5000);
     C.speed_low = clampi(cfg_int("speed_low", 0), 0, 300);
     C.speed_high = clampi(cfg_int("speed_high", 80), 0, 300);
     C.speed_color_low = clampi(cfg_int("speed_color_low", 44), 0, 63);
@@ -279,7 +355,7 @@ static long long now_ms(void) {
     return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 static void show_config(void) {
-    say("settings: preset=%s brightness_curve=%s", C.preset, C.bright_curve);
+    say("settings: palette=%s (%s) preset=%s brightness_curve=%s", active_palette, C.palette, C.preset, C.bright_curve);
     say("settings: mode=%s brightness %d..%d loudness_range=%ddB | beat %d-%dHz sensitivity=%d%% avg=%dms min=%dms flash=%d/%dms step=%d | pulse_decay=%d | spectrum margin=%d%% smoothing=%dms bands=\"%s\" | interval=%dms idle=%ds silence=%ddB drive_mode_override=%d",
         C.mode, C.bright_min, C.bright_max, C.loudness_range_db, C.beat_low_hz, C.beat_high_hz, C.sensitivity, C.beat_avg_ms,
         C.min_beat_ms, flash_enabled(), C.flash_ms, C.beat_step, C.pulse_decay, C.switch_margin, C.band_smoothing_ms, C.bands_text,
@@ -287,13 +363,108 @@ static void show_config(void) {
     if (!strcmp(C.mode, "speed")) say("settings: speed %d %s = colour #%d, %d %s = colour #%d", C.speed_low, C.speed_unit, C.speed_color_low, C.speed_high, C.speed_unit, C.speed_color_high);
 }
 
-/* ---------- child processes (service call / logcat) ---------- */
+/* ---------- child processes (persistent LampHelper + fallback service call / logcat) ---------- */
 static pid_t pending_pid = 0;
+static pid_t helper_pid = 0;
+static int helper_in = -1, helper_out = -1, helper_failed = 0;
+
 static void reap(void) {
     int st; pid_t p;
-    while ((p = waitpid(-1, &st, WNOHANG)) > 0) if (p == pending_pid) pending_pid = 0;
+    while ((p = waitpid(-1, &st, WNOHANG)) > 0) {
+        if (p == pending_pid) pending_pid = 0;
+        if (p == helper_pid) {
+            helper_pid = 0;
+            if (helper_in >= 0) { close(helper_in); helper_in = -1; }
+            if (helper_out >= 0) { close(helper_out); helper_out = -1; }
+        }
+    }
 }
 static void wait_pending(void) { reap(); if (pending_pid) { waitpid(pending_pid, NULL, 0); pending_pid = 0; } }
+static void helper_stop(void) {
+    if (helper_in >= 0) { close(helper_in); helper_in = -1; }
+    if (helper_out >= 0) { close(helper_out); helper_out = -1; }
+    if (helper_pid > 0) { kill(helper_pid, SIGTERM); waitpid(helper_pid, NULL, 0); helper_pid = 0; }
+}
+static int helper_wait_line(int fd, int timeout_ms, const char *want) {
+    char buf[128]; int n = 0;
+    long long deadline = now_ms() + timeout_ms;
+    while (n < (int)sizeof buf - 1) {
+        long long rem = deadline - now_ms();
+        if (rem <= 0) return 0;
+        fd_set rfds; FD_ZERO(&rfds); FD_SET(fd, &rfds);
+        struct timeval tv = { (int)(rem / 1000), (int)((rem % 1000) * 1000) };
+        if (select(fd + 1, &rfds, NULL, NULL, &tv) <= 0) return 0;
+        ssize_t r = read(fd, buf + n, 1);
+        if (r <= 0) return 0;
+        if (buf[n] == '\n') { buf[n] = 0; return !want || strstr(buf, want) != NULL; }
+        n++;
+    }
+    return 0;
+}
+static int helper_start(void) {
+    if (helper_pid > 0 && helper_in >= 0) return 1;
+    if (helper_failed || C.dry) return 0;
+    if (access("/system/bin/app_process", X_OK) != 0) { helper_failed = 1; return 0; }
+    char apk[320] = "/data/hmgapi/mods/light-vibes/app/LightVibes.apk";
+    char exe[256]; ssize_t elen = readlink("/proc/self/exe", exe, sizeof exe - 1);
+    if (elen > 0) {
+        exe[elen] = 0;
+        char *sl = strrchr(exe, '/');
+        if (sl) { *sl = 0; snprintf(apk, sizeof apk, "%s/app/LightVibes.apk", exe); }
+    }
+    if (access(apk, R_OK) != 0) snprintf(apk, sizeof apk, "/data/hmgapi/mods/light-vibes/app/LightVibes.apk");
+    if (access(apk, R_OK) != 0) { helper_failed = 1; return 0; }
+    mkdir("/data/hmgapi/logs", 0755);
+    mkdir("/data/hmgapi/logs/light-vibes", 0755);
+    mkdir("/data/hmgapi/logs/light-vibes/dalvik-cache", 0755);
+    int in_p[2], out_p[2];
+    if (pipe(in_p) != 0) return 0;
+    if (pipe(out_p) != 0) { close(in_p[0]); close(in_p[1]); return 0; }
+    pid_t p = fork();
+    if (p < 0) { close(in_p[0]); close(in_p[1]); close(out_p[0]); close(out_p[1]); return 0; }
+    if (p == 0) {
+        int nul = open("/dev/null", O_RDWR);
+        dup2(in_p[0], 0);
+        dup2(out_p[1], 1);
+        if (nul >= 0) { dup2(nul, 2); close(nul); }
+        close(in_p[0]); close(in_p[1]); close(out_p[0]); close(out_p[1]);
+        setenv("CLASSPATH", apk, 1);
+        setenv("ANDROID_DATA", "/data/hmgapi/logs/light-vibes", 1);
+        unsetenv("LD_PRELOAD");
+        char *a[] = {"/system/bin/app_process", "/system/bin", "lightvibes.app.LampHelper", C.svc_name, NULL};
+        execve(a[0], a, environ);
+        _exit(127);
+    }
+    close(in_p[0]); close(out_p[1]);
+    fcntl(in_p[1], F_SETFD, FD_CLOEXEC);
+    fcntl(out_p[0], F_SETFD, FD_CLOEXEC);
+    if (!helper_wait_line(out_p[0], 2500, "ready")) {
+        kill(p, SIGKILL); waitpid(p, NULL, 0);
+        close(in_p[1]); close(out_p[0]);
+        helper_failed = 1;
+        say("lamp helper did not start — using service call fallback");
+        return 0;
+    }
+    int fl = fcntl(in_p[1], F_GETFL);
+    if (fl >= 0) fcntl(in_p[1], F_SETFL, fl | O_NONBLOCK);
+    helper_pid = p; helper_in = in_p[1]; helper_out = out_p[0];
+    say("lamp helper ready (pid %d)", (int)p);
+    return 1;
+}
+static int helper_send(const char *cmd, int wait_for_it) {
+    reap();
+    if (!helper_start()) return 0;
+    size_t len = strlen(cmd);
+    if (write(helper_in, cmd, len) != (ssize_t)len) {
+        helper_stop();
+        return 0;
+    }
+    if (wait_for_it && !helper_wait_line(helper_out, 1000, "ok")) {
+        helper_stop();
+        return 0;
+    }
+    return 1;
+}
 static pid_t spawn(char *const argv[], int out_fd, int wait_for_it) {
     pid_t p = fork();
     if (p == 0) {
@@ -312,6 +483,9 @@ static void enc(char *buf, size_t n, int v) { snprintf(buf, n, "%d", ((v >> 8) &
 
 static void light_rgb(int r, int g, int b, int wait_for_it) {
     if (C.dry) { say("DRY rgb %d %d %d", r, g, b); return; }
+    char cmd[64];
+    snprintf(cmd, sizeof cmd, "rgb %d %d %d%s\n", r, g, b, wait_for_it ? " sync" : "");
+    if (helper_send(cmd, wait_for_it)) return;
     char er[16], eg[16], eb[16];
     enc(er, sizeof er, r); enc(eg, sizeof eg, g); enc(eb, sizeof eb, b);
     /* service call <svc> 78  i32 2 i32 <r>  i32 2 i32 <g>  i32 2 i32 <b>   (byte[2] = length, packed bytes) */
@@ -322,6 +496,9 @@ static void light_rgb(int r, int g, int b, int wait_for_it) {
 }
 static void light_config(int mode, int data, int wait_for_it) {
     if (C.dry) { say("DRY config mode %d data %d", mode, data); return; }
+    char cmd[64];
+    snprintf(cmd, sizeof cmd, "cfg %d %d%s\n", mode, data, wait_for_it ? " sync" : "");
+    if (helper_send(cmd, wait_for_it)) return;
     char m[16], v[16]; snprintf(m, sizeof m, "%d", mode); snprintf(v, sizeof v, "%d", data);
     char *a[] = {C.service_bin, "call", C.svc_name, "77", "i32", m, "i32", v, NULL};
     pid_t p = spawn(a, -1, wait_for_it);
@@ -376,8 +553,10 @@ static void base_from(const int *s) {
 }
 /* r g b brightness drive_mode, as the lamp reports them */
 static int read_lamp(int *out) {
-    char *req[] = {C.service_bin, "call", C.svc_name, "76", NULL};
-    spawn(req, -1, 1);
+    if (!helper_send("req sync\n", 1)) {
+        char *req[] = {C.service_bin, "call", C.svc_name, "76", NULL};
+        spawn(req, -1, 1);
+    }
     usleep(400 * 1000);
     int fd[2]; if (pipe(fd)) return 0;
     char *lc[] = {C.logcat_bin, "-d", "-v", "brief", "-s", "SystemService:D", NULL};
@@ -412,6 +591,15 @@ static void snapshot_base(void) {
     } else {
         base.valid = 0;
         say("could not read the user's colour back (no status reply in logcat); will not restore");
+    }
+    if (base.valid && !strcmp(C.palette, "auto")) {
+        if (palette_has_rgb(HYUNDAI_R, HYUNDAI_G, HYUNDAI_B, base.r, base.g, base.b) && strcmp(active_palette, "hyundai")) {
+            set_palette("hyundai");
+            say("lamp colour (%d,%d,%d) matched hyundai palette", base.r, base.g, base.b);
+        } else if (palette_has_rgb(KIA_R, KIA_G, KIA_B, base.r, base.g, base.b) && strcmp(active_palette, "kia")) {
+            set_palette("kia");
+            say("lamp colour (%d,%d,%d) matched kia palette", base.r, base.g, base.b);
+        }
     }
 }
 static void take_over_lamp(void) {
@@ -535,9 +723,9 @@ static Frame ana_block(Ana *a, const short *buf, int frames, long long t) {
     for (int i = 0; i < NFFT; i++) { a->re[i] = a->ring[i] * a->win[i]; a->im[i] = 0; }
     fft(a->re, a->im);
 
-    /* beat: beat-band energy, short average vs long average */
+    /* beat: beat-band energy, instant attack + smoothed release vs long average */
     double eb = band_energy(a->re, a->im, C.beat_low_hz, C.beat_high_hz);
-    a->beat_fast = 0.5 * a->beat_fast + 0.5 * eb;
+    a->beat_fast = eb > a->beat_fast ? eb : 0.5 * a->beat_fast + 0.5 * eb;
     double alpha_slow = BLOCK_MS / (double)C.beat_avg_ms;
     if (t < 1500) alpha_slow = alpha_slow * 4 > 0.5 ? 0.5 : alpha_slow * 4;   /* settle fast at start */
     if (a->beat_slow <= 0) a->beat_slow = eb;
@@ -600,16 +788,19 @@ static int wheel_next(int i, int step) {
     return i;
 }
 
+#define BEAT_GUARD_MS 40
+
 static void drive(Drv *d, Ana *a, Frame f, long long t) {
     int want_idx, want_level, wr = 0, wg = 0, wb = 0;
     if (f.beat && flash_enabled()) d->flash_until = t + C.flash_ms;
     int flashing = t < d->flash_until;
+    int pulse_mode = !strcmp(C.mode, "pulse");
 
     if (!strcmp(C.mode, "spectrum")) {
         if (f.band >= 0) { wr = C.bands[f.band].r; wg = C.bands[f.band].g; wb = C.bands[f.band].b; want_idx = 1000 + f.band; }
         else want_idx = d->idx;
         want_level = flashing ? C.bright_max : loud_level(a, f.db);
-    } else if (!strcmp(C.mode, "pulse")) {
+    } else if (pulse_mode) {
         double keep = pow(C.pulse_decay / 100.0, BLOCK_MS / 100.0);
         double hit = f.beat_ratio > 1 ? (f.beat_ratio - 1) / (C.sensitivity / 100.0 - 1 + 1e-6) : 0;
         if (hit > 1) hit = 1;
@@ -624,22 +815,25 @@ static void drive(Drv *d, Ana *a, Frame f, long long t) {
     }
 
     reap();
-    if (pending_pid) return;   /* one command in flight at a time */
+    if (pending_pid) return;   /* fallback service call still in flight */
 
+    int beat_iv = C.min_interval_ms < BEAT_GUARD_MS ? C.min_interval_ms : BEAT_GUARD_MS;
+    int col_iv = f.beat ? beat_iv : C.min_interval_ms;
     if (want_idx >= 0 && want_idx < 64) { wr = WHEEL_R[want_idx]; wg = WHEEL_G[want_idx]; wb = WHEEL_B[want_idx]; }
     int key = want_idx < 0 ? -1 : (wr << 16) | (wg << 8) | wb;
-    if (key >= 0 && key != d->sent_idx && t - d->last_color >= C.min_interval_ms) {
+    if (key >= 0 && key != d->sent_idx && t - d->last_color >= col_iv) {
         light_rgb(wr, wg, wb, 0);
         d->sent_idx = key; d->last_color = t;
         if (C.debug) {
             if (want_idx >= 1000) say("colour band %d-%dHz (%d,%d,%d)", C.bands[want_idx - 1000].lo, C.bands[want_idx - 1000].hi, wr, wg, wb);
             else say("colour #%d (%d,%d,%d)%s", want_idx, wr, wg, wb, f.beat ? " [beat]" : "");
         }
-        return;
+        if (pending_pid) return;
     }
     int diff = want_level - d->sent_level; if (diff < 0) diff = -diff;
     int edge = want_level == C.bright_max || want_level == C.bright_min;
-    if (want_level != d->sent_level && (d->sent_level < 0 || diff >= 2 || edge) && t - d->last_bright >= C.min_interval_ms) {
+    int br_iv = (f.beat && (flashing || pulse_mode)) ? beat_iv : C.min_interval_ms;
+    if (want_level != d->sent_level && (d->sent_level < 0 || diff >= 2 || edge || pulse_mode || (f.beat && flashing)) && t - d->last_bright >= br_iv) {
         light_bright_raw(want_level + 1, 0);
         d->sent_level = want_level; d->last_bright = t;
         if (C.debug >= 3) say("brightness %d", want_level);
@@ -1042,7 +1236,7 @@ int main(int argc, char **argv) {
             }
             int nz = 0; for (int i = 0; i < PERIOD * CH; i++) if (buf[i]) { nz = 1; break; }
             if (!nz) {
-                if (++zero_blocks >= 47 && t - last_fix >= 5000) {   /* ~1 s of digital zeros */
+                if (++zero_blocks * BLOCK_MS >= 1000 && t - last_fix >= 5000) {   /* ~1 s of digital zeros */
                     say("capture is all zeros while music plays — re-enabling loopback");
                     set_loopback(1); last_fix = t; zero_blocks = 0;
                 }
@@ -1078,6 +1272,7 @@ int main(int argc, char **argv) {
 
     say("stopping");
     if (lights_active) restore_base();
+    helper_stop();
     set_loopback(0);
     return 0;
 }
