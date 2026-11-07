@@ -65,10 +65,19 @@ static int rate = MAX_RATE;   /* the capture side only runs at the rate playback
 
 extern char **environ;
 
-/* ---------- factory 64-colour custom wheel (VehicleSettings ac.dOs/dOt/dOu, Kia) ---------- */
-static const unsigned char WHEEL_R[64] = {16,16,16,33,47,64,82,100,120,136,155,169,183,193,204,213,221,228,235,239,246,250,254,255,255,255,255,255,255,255,255,255,255,255,254,255,246,233,220,202,166,168,149,132,117,104,93,81,71,62,53,44,37,30,25,20,16,16,16,16,16,16,16,16};
-static const unsigned char WHEEL_G[64] = {67,46,32,28,28,28,28,28,28,29,33,35,35,33,31,27,23,19,14,10,6,4,1,50,68,80,105,120,143,166,195,205,218,232,243,255,255,255,255,252,226,243,235,229,223,221,222,225,231,238,245,250,250,250,250,250,244,230,210,187,163,138,111,89};
-static const unsigned char WHEEL_B[64] = {244,242,239,239,239,239,239,239,239,239,239,239,234,224,210,192,174,153,153,116,96,81,69,29,35,39,48,53,62,70,88,118,158,200,230,255,246,221,188,147,91,98,98,98,98,98,105,118,133,152,169,189,207,225,237,249,252,252,252,252,252,252,252,248};
+/* ---------- factory 64-colour custom wheels (Kia EV6 & Hyundai Ioniq 5 VehicleSettings) ---------- */
+static const unsigned char KIA_R[64] = {16,16,16,33,47,64,82,100,120,136,155,169,183,193,204,213,221,228,235,239,246,250,254,255,255,255,255,255,255,255,255,255,255,255,254,255,246,233,220,202,166,168,149,132,117,104,93,81,71,62,53,44,37,30,25,20,16,16,16,16,16,16,16,16};
+static const unsigned char KIA_G[64] = {67,46,32,28,28,28,28,28,28,29,33,35,35,33,31,27,23,19,14,10,6,4,1,50,68,80,105,120,143,166,195,205,218,232,243,255,255,255,255,252,226,243,235,229,223,221,222,225,231,238,245,250,250,250,250,250,244,230,210,187,163,138,111,89};
+static const unsigned char KIA_B[64] = {244,242,239,239,239,239,239,239,239,239,239,239,234,224,210,192,174,153,153,116,96,81,69,29,35,39,48,53,62,70,88,118,158,200,230,255,246,221,188,147,91,98,98,98,98,98,105,118,133,152,169,189,207,225,237,249,252,252,252,252,252,252,252,248};
+
+static const unsigned char HYUNDAI_R[64] = {176,195,205,232,255,255,255,255,255,255,255,255,254,255,254,254,255,255,255,255,255,255,255,254,255,255,255,255,255,255,255,255,255,254,255,254,247,230,210,175,119,58,10,0,0,0,0,0,0,0,0,0,25,55,81,100,109,122,125,128,130,143,156,167};
+static const unsigned char HYUNDAI_G[64] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,96,107,73,88,113,125,3,34,48,60,65,137,148,160,172,177,191,207,216,237,255,254,255,254,254,255,255,217,180,161,140,125,115,99,85,62,0,0,0,0,42,52,25,0,0,0,0,0};
+static const unsigned char HYUNDAI_B[64] = {255,254,254,254,241,195,158,137,117,111,106,101,95,72,58,30,106,116,73,88,113,115,10,0,23,42,49,107,119,111,113,108,123,138,147,165,182,186,188,191,196,198,235,245,255,255,255,255,254,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255};
+
+static const unsigned char *WHEEL_R = KIA_R, *WHEEL_G = KIA_G, *WHEEL_B = KIA_B;
+static const char *active_palette = "kia";
+static const char *build_prop_path = "/system/build.prop";
+static const char *hmgapi_json_path = "/data/hmgapi/settings/hmgapi.json";
 
 /* ---------- config ---------- */
 static const char *log_path = "/data/hmgapi/logs/light-vibes/lightvibesd.log";
@@ -78,6 +87,7 @@ typedef struct { int lo, hi, color; double gain; int r, g, b; } Band;   /* color
 static struct {
     char dir[256];
     int enabled, debug, dry;
+    char palette[16];           /* auto | kia | hyundai */
     char mode[16];              /* beat | spectrum | pulse | speed */
     int speed_low, speed_high, speed_color_low, speed_color_high;   /* speed mode: in speed_unit, wheel indexes */
     char speed_unit[8];         /* mph | kmh */
@@ -123,6 +133,69 @@ static void cfg_str(const char *k, char *out, size_t n, const char *def) {
 }
 static int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
+static void str_lower(char *s) {
+    for (; *s; s++) if (*s >= 'A' && *s <= 'Z') *s += 'a' - 'A';
+}
+static const char *match_make(const char *s) {
+    if (strstr(s, "neev") || strstr(s, "ceev") || strstr(s, "ioniq") || strstr(s, "ecohmc") || strstr(s, "hyundai")) return "hyundai";
+    if (strstr(s, "cvev") || strstr(s, "dl3") || strstr(s, "ev6") || strstr(s, "ecokia") || strstr(s, "kia")) return "kia";
+    return NULL;
+}
+static const char *detect_palette(void) {
+    if (!strcmp(C.palette, "hyundai") || !strcmp(C.palette, "kia")) return C.palette;
+    static const char *const keys[] = {
+        "ro.build.product=", "ro.product.device=", "ro.product.name=",
+        "ro.product.model=", "ro.build.fingerprint=", "ro.mobis.onebindir=", NULL
+    };
+    FILE *f = fopen(build_prop_path, "r");
+    if (f) {
+        char line[512];
+        while (fgets(line, sizeof line, f)) {
+            str_lower(line);
+            for (int i = 0; keys[i]; i++) {
+                size_t klen = strlen(keys[i]);
+                if (!strncmp(line, keys[i], klen)) {
+                    const char *m = match_make(line + klen);
+                    if (m) { fclose(f); return m; }
+                }
+            }
+        }
+        fclose(f);
+    }
+    f = fopen(hmgapi_json_path, "r");
+    if (f) {
+        char buf[2048];
+        size_t n = fread(buf, 1, sizeof buf - 1, f);
+        fclose(f);
+        buf[n] = 0; str_lower(buf);
+        const char *m = match_make(buf);
+        if (m) return m;
+    }
+    return "kia";
+}
+static void set_palette(const char *name) {
+    if (!strcmp(name, "hyundai")) {
+        WHEEL_R = HYUNDAI_R; WHEEL_G = HYUNDAI_G; WHEEL_B = HYUNDAI_B;
+        active_palette = "hyundai";
+    } else {
+        WHEEL_R = KIA_R; WHEEL_G = KIA_G; WHEEL_B = KIA_B;
+        active_palette = "kia";
+    }
+    for (int i = 0; i < C.nbands; i++) {
+        int col = C.bands[i].color;
+        if (col >= 0 && col < 64) {
+            C.bands[i].r = WHEEL_R[col];
+            C.bands[i].g = WHEEL_G[col];
+            C.bands[i].b = WHEEL_B[col];
+        }
+    }
+}
+static int palette_has_rgb(const unsigned char *r_tab, const unsigned char *g_tab, const unsigned char *b_tab, int r, int g, int b) {
+    for (int i = 0; i < 64; i++)
+        if (r_tab[i] == r && g_tab[i] == g && b_tab[i] == b) return 1;
+    return 0;
+}
+
 /* bands: "lo-hi:colour:boost ..." e.g. "40-150:22:1 150-500:28:1.5" (colour = wheel index 0-63) */
 static const char *DEFAULT_BANDS = "30-150:22:1 150-500:28:2 500-2000:44:4 2000-6000:56:10 6000-16000:8:30";
 static int parse_bands(const char *txt, Band *out) {
@@ -154,6 +227,8 @@ static const char *REPO_BANDS = "60-700:23:1.5 700-1000:28:0.2 1000-2000:38:0.9 
 static void load_config(const char *dir) {
     char d[sizeof C.dir]; snprintf(d, sizeof d, "%s", dir);   /* dir may be C.dir itself */
     snprintf(C.dir, sizeof C.dir, "%s", d);
+    cfg_str("palette", C.palette, sizeof C.palette, "auto");
+    set_palette(detect_palette());
     cfg_str("preset", C.preset, sizeof C.preset, "standard");
     int repo = !strcmp(C.preset, "repo");
     C.enabled = cfg_int("enabled", 1);
@@ -279,7 +354,7 @@ static long long now_ms(void) {
     return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 static void show_config(void) {
-    say("settings: preset=%s brightness_curve=%s", C.preset, C.bright_curve);
+    say("settings: palette=%s (%s) preset=%s brightness_curve=%s", active_palette, C.palette, C.preset, C.bright_curve);
     say("settings: mode=%s brightness %d..%d loudness_range=%ddB | beat %d-%dHz sensitivity=%d%% avg=%dms min=%dms flash=%d/%dms step=%d | pulse_decay=%d | spectrum margin=%d%% smoothing=%dms bands=\"%s\" | interval=%dms idle=%ds silence=%ddB drive_mode_override=%d",
         C.mode, C.bright_min, C.bright_max, C.loudness_range_db, C.beat_low_hz, C.beat_high_hz, C.sensitivity, C.beat_avg_ms,
         C.min_beat_ms, flash_enabled(), C.flash_ms, C.beat_step, C.pulse_decay, C.switch_margin, C.band_smoothing_ms, C.bands_text,
@@ -412,6 +487,15 @@ static void snapshot_base(void) {
     } else {
         base.valid = 0;
         say("could not read the user's colour back (no status reply in logcat); will not restore");
+    }
+    if (base.valid && !strcmp(C.palette, "auto")) {
+        if (palette_has_rgb(HYUNDAI_R, HYUNDAI_G, HYUNDAI_B, base.r, base.g, base.b) && strcmp(active_palette, "hyundai")) {
+            set_palette("hyundai");
+            say("lamp colour (%d,%d,%d) matched hyundai palette", base.r, base.g, base.b);
+        } else if (palette_has_rgb(KIA_R, KIA_G, KIA_B, base.r, base.g, base.b) && strcmp(active_palette, "kia")) {
+            set_palette("kia");
+            say("lamp colour (%d,%d,%d) matched kia palette", base.r, base.g, base.b);
+        }
     }
 }
 static void take_over_lamp(void) {
