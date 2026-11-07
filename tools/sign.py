@@ -14,8 +14,8 @@ import base64, hashlib, json, os, shutil, subprocess, sys, tempfile, zipfile
 
 # what NEMESIS's store shows as compatible: only what the mod was tested on. A glob of
 # ro.build.product, and the unit's /system/onebin folder name.
-TESTED_OS = "CVEV.USA.*.260507,NEEV.USA.*.260507,NEEV23.USA.*.260507,NEEV23SE.USA.*.260507"
-TESTED_MODELS = "cvev_us,neev_us,neev23se_us"
+TESTED_OS = "CVEV.USA.*.*,NEEV.USA.*.*,NEEV23.USA.*.*,NEEV23SE.USA.*.*,CEEV.USA.*.*"
+TESTED_MODELS = "cvev_us,neev_us,neev23_us,neev23se_us,ceev_us"
 
 META = "META-HMGAPI"
 
@@ -68,7 +68,7 @@ def tested_on(descriptor):
     return descriptor
 
 
-def nemesis_usb_py(signed, mod, hmgapi, dist):
+def nemesis_usb_py(signed, mod, mod_dir, hmgapi, dist):
     """Pure-Python equivalent of HMG-API's tools/mknemesismod.sh when sh/zip are unavailable (e.g. Windows)."""
     import re
     hmgapi = os.path.abspath(hmgapi)
@@ -100,11 +100,14 @@ def nemesis_usb_py(signed, mod, hmgapi, dist):
         zi.external_attr = (0o755 if exec_bit else 0o644) << 16
         z.writestr(zi, data)
 
+    open_sh = os.path.join(mod_dir, "open.sh")
+    if not os.path.isfile(open_sh):
+        open_sh = os.path.join(hmgapi, "install/nemesis/bin/open.sh")
     store = os.path.join(dist, f"{mid}-v{ver}-nemesis-package.zip")
     out = os.path.join(dist, f"{mid}-v{ver}-nemesis-usb.zip")
     pkg_entries = {
         "NEMESIS.data": (tested_on(fill("install/nemesis/mod/NEMESIS.data.in")), False),
-        "bin/open.sh": (open(os.path.join(hmgapi, "install/nemesis/bin/open.sh"), "rb").read(), True),
+        "bin/open.sh": (open(open_sh, "rb").read(), True),
         "mod/id": ((mid + "\n").encode("utf-8"), False),
         "mod/package.zip": (open(signed, "rb").read(), False),
     }
@@ -129,10 +132,10 @@ def nemesis_usb_py(signed, mod, hmgapi, dist):
     return out, store
 
 
-def nemesis_usb(signed, mod, hmgapi, dist):
+def nemesis_usb(signed, mod, mod_dir, hmgapi, dist):
     """HMG-API's own tool wraps the signed zip; it names the results <id>-<version>-nemesis[-package].zip."""
     if not shutil.which("sh") or not shutil.which("zip") or not shutil.which("unzip"):
-        return nemesis_usb_py(signed, mod, hmgapi, dist)
+        return nemesis_usb_py(signed, mod, mod_dir, hmgapi, dist)
     tool = os.path.join(os.path.abspath(hmgapi), "tools", "mknemesismod.sh")
     with tempfile.TemporaryDirectory() as t:
         subprocess.run(["sh", tool, os.path.abspath(signed), t], check=True, capture_output=True)
@@ -141,6 +144,10 @@ def nemesis_usb(signed, mod, hmgapi, dist):
         shutil.move(os.path.join(t, f"{mod['id']}-{mod['version']}-nemesis.zip"), out)
         shutil.move(os.path.join(t, f"{mod['id']}-{mod['version']}-nemesis-package.zip"), store)
     swap_in_zip(store, "NEMESIS.data", tested_on)
+    open_sh = os.path.join(mod_dir, "open.sh")
+    if os.path.isfile(open_sh):
+        open_bytes = open(open_sh, "rb").read()
+        swap_in_zip(store, "bin/open.sh", lambda _: open_bytes)
     packed = open(store, "rb").read()
     swap_in_zip(out, f"packages/hmgapi.{mod['id']}.zip", lambda _: packed)
     return out, store
@@ -199,7 +206,7 @@ def build(mod_dir, dist, key, hmgapi):
     print(f"signed {mod['id']} {mod['version']}: {len(files)} files, uuid {uuid_of(pub)}")
     print(out)
     print(usb)
-    print(*nemesis_usb(out, mod, hmgapi, dist), sep="\n")
+    print(*nemesis_usb(out, mod, mod_dir, hmgapi, dist), sep="\n")
 
 
 if __name__ == "__main__":

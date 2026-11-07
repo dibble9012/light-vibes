@@ -67,7 +67,7 @@ echo "== mod"
 M=build/mod
 rm -rf $M
 mkdir -p $M/app $M/defaults
-cp mod/mod.json mod/lights.sh build/lightvibesd $M/
+cp mod/mod.json mod/lights.sh mod/open.sh build/lightvibesd $M/
 cp $A/LightVibes.apk $M/app/
 python3 tools/make_icons.py $M/icons
 # defaults until the app has been opened: the lively preset, one value per file

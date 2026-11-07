@@ -6,7 +6,7 @@ Siri or a phone call comes in, your own colour and brightness come back.
 
 **[Download the latest release](https://github.com/lemoyneiv/light-vibes/releases/latest)**
 
-Tested on a 2023 Kia EV6 GT-Line (USA) and supports the Hyundai Ioniq 5 (USA Gen5W), auto-detecting the
+Tested on the Kia EV6, Hyundai Ioniq 5, and Hyundai Ioniq 6 (USA Gen5W), auto-detecting the
 vehicle's factory 64-colour ambient light palette at runtime. This is an early version, and some parts
 haven't been tried on the car yet: see [What's been tested](#whats-been-tested).
 
@@ -43,7 +43,9 @@ Manager.
 
 ## Using it
 
-Open the **Light Vibes** tile. Every change applies right away.
+Open the **Light Vibes** tile on the home screen, or tap **Launch** on **Light Vibes** in NEMESIS Manager
+(on cars where HMG-API does not have a built-in hook map yet, such as the Ioniq 6, you can also enable the
+home screen tile via **HMG-API -> Settings -> Hook map -> Map this car from its files**, then **Check the map on this car** and restart). Every change applies right away.
 
 - **On/Off** switches the effect off without uninstalling the mod.
 - **Presets:** Lively (the default), Marigold, Contrast, Bold Flash, Glow, Epic and Speed. Tap one to
