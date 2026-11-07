@@ -42,6 +42,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -52,12 +53,12 @@
 #include <unistd.h>
 #include <tinyalsa/asoundlib.h>
 
-#define VERSION "0.5.0"
+#define VERSION "0.5.1"
 #define MAX_RATE 48000
 static int rate = MAX_RATE;   /* the capture side only runs at the rate playback is using */
 #define SOURCE_START_MS 2000  /* Android-mixer audio must last this long: it also carries short system sounds */
 #define CH 2
-#define PERIOD 1024                 /* 21.3 ms per analysis step */
+#define PERIOD 512                  /* 10.7 ms per analysis step at 48 kHz */
 #define NFFT 2048
 #define BIN_HZ ((double)rate / NFFT)
 #define BLOCK_MS (1000.0 * PERIOD / rate)
@@ -234,7 +235,7 @@ static void load_config(const char *dir) {
     C.enabled = cfg_int("enabled", 1);
     C.debug = cfg_int("debug", 0);
     cfg_str("mode", C.mode, sizeof C.mode, repo ? "spectrum" : "beat");
-    C.min_interval_ms = clampi(cfg_int("min_interval_ms", 250), 150, 5000);
+    C.min_interval_ms = clampi(cfg_int("min_interval_ms", 100), 50, 5000);
     C.speed_low = clampi(cfg_int("speed_low", 0), 0, 300);
     C.speed_high = clampi(cfg_int("speed_high", 80), 0, 300);
     C.speed_color_low = clampi(cfg_int("speed_color_low", 44), 0, 63);
@@ -362,13 +363,108 @@ static void show_config(void) {
     if (!strcmp(C.mode, "speed")) say("settings: speed %d %s = colour #%d, %d %s = colour #%d", C.speed_low, C.speed_unit, C.speed_color_low, C.speed_high, C.speed_unit, C.speed_color_high);
 }
 
-/* ---------- child processes (service call / logcat) ---------- */
+/* ---------- child processes (persistent LampHelper + fallback service call / logcat) ---------- */
 static pid_t pending_pid = 0;
+static pid_t helper_pid = 0;
+static int helper_in = -1, helper_out = -1, helper_failed = 0;
+
 static void reap(void) {
     int st; pid_t p;
-    while ((p = waitpid(-1, &st, WNOHANG)) > 0) if (p == pending_pid) pending_pid = 0;
+    while ((p = waitpid(-1, &st, WNOHANG)) > 0) {
+        if (p == pending_pid) pending_pid = 0;
+        if (p == helper_pid) {
+            helper_pid = 0;
+            if (helper_in >= 0) { close(helper_in); helper_in = -1; }
+            if (helper_out >= 0) { close(helper_out); helper_out = -1; }
+        }
+    }
 }
 static void wait_pending(void) { reap(); if (pending_pid) { waitpid(pending_pid, NULL, 0); pending_pid = 0; } }
+static void helper_stop(void) {
+    if (helper_in >= 0) { close(helper_in); helper_in = -1; }
+    if (helper_out >= 0) { close(helper_out); helper_out = -1; }
+    if (helper_pid > 0) { kill(helper_pid, SIGTERM); waitpid(helper_pid, NULL, 0); helper_pid = 0; }
+}
+static int helper_wait_line(int fd, int timeout_ms, const char *want) {
+    char buf[128]; int n = 0;
+    long long deadline = now_ms() + timeout_ms;
+    while (n < (int)sizeof buf - 1) {
+        long long rem = deadline - now_ms();
+        if (rem <= 0) return 0;
+        fd_set rfds; FD_ZERO(&rfds); FD_SET(fd, &rfds);
+        struct timeval tv = { (int)(rem / 1000), (int)((rem % 1000) * 1000) };
+        if (select(fd + 1, &rfds, NULL, NULL, &tv) <= 0) return 0;
+        ssize_t r = read(fd, buf + n, 1);
+        if (r <= 0) return 0;
+        if (buf[n] == '\n') { buf[n] = 0; return !want || strstr(buf, want) != NULL; }
+        n++;
+    }
+    return 0;
+}
+static int helper_start(void) {
+    if (helper_pid > 0 && helper_in >= 0) return 1;
+    if (helper_failed || C.dry) return 0;
+    if (access("/system/bin/app_process", X_OK) != 0) { helper_failed = 1; return 0; }
+    char apk[320] = "/data/hmgapi/mods/light-vibes/app/LightVibes.apk";
+    char exe[256]; ssize_t elen = readlink("/proc/self/exe", exe, sizeof exe - 1);
+    if (elen > 0) {
+        exe[elen] = 0;
+        char *sl = strrchr(exe, '/');
+        if (sl) { *sl = 0; snprintf(apk, sizeof apk, "%s/app/LightVibes.apk", exe); }
+    }
+    if (access(apk, R_OK) != 0) snprintf(apk, sizeof apk, "/data/hmgapi/mods/light-vibes/app/LightVibes.apk");
+    if (access(apk, R_OK) != 0) { helper_failed = 1; return 0; }
+    mkdir("/data/hmgapi/logs", 0755);
+    mkdir("/data/hmgapi/logs/light-vibes", 0755);
+    mkdir("/data/hmgapi/logs/light-vibes/dalvik-cache", 0755);
+    int in_p[2], out_p[2];
+    if (pipe(in_p) != 0) return 0;
+    if (pipe(out_p) != 0) { close(in_p[0]); close(in_p[1]); return 0; }
+    pid_t p = fork();
+    if (p < 0) { close(in_p[0]); close(in_p[1]); close(out_p[0]); close(out_p[1]); return 0; }
+    if (p == 0) {
+        int nul = open("/dev/null", O_RDWR);
+        dup2(in_p[0], 0);
+        dup2(out_p[1], 1);
+        if (nul >= 0) { dup2(nul, 2); close(nul); }
+        close(in_p[0]); close(in_p[1]); close(out_p[0]); close(out_p[1]);
+        setenv("CLASSPATH", apk, 1);
+        setenv("ANDROID_DATA", "/data/hmgapi/logs/light-vibes", 1);
+        unsetenv("LD_PRELOAD");
+        char *a[] = {"/system/bin/app_process", "/system/bin", "lightvibes.app.LampHelper", C.svc_name, NULL};
+        execve(a[0], a, environ);
+        _exit(127);
+    }
+    close(in_p[0]); close(out_p[1]);
+    fcntl(in_p[1], F_SETFD, FD_CLOEXEC);
+    fcntl(out_p[0], F_SETFD, FD_CLOEXEC);
+    if (!helper_wait_line(out_p[0], 2500, "ready")) {
+        kill(p, SIGKILL); waitpid(p, NULL, 0);
+        close(in_p[1]); close(out_p[0]);
+        helper_failed = 1;
+        say("lamp helper did not start — using service call fallback");
+        return 0;
+    }
+    int fl = fcntl(in_p[1], F_GETFL);
+    if (fl >= 0) fcntl(in_p[1], F_SETFL, fl | O_NONBLOCK);
+    helper_pid = p; helper_in = in_p[1]; helper_out = out_p[0];
+    say("lamp helper ready (pid %d)", (int)p);
+    return 1;
+}
+static int helper_send(const char *cmd, int wait_for_it) {
+    reap();
+    if (!helper_start()) return 0;
+    size_t len = strlen(cmd);
+    if (write(helper_in, cmd, len) != (ssize_t)len) {
+        helper_stop();
+        return 0;
+    }
+    if (wait_for_it && !helper_wait_line(helper_out, 1000, "ok")) {
+        helper_stop();
+        return 0;
+    }
+    return 1;
+}
 static pid_t spawn(char *const argv[], int out_fd, int wait_for_it) {
     pid_t p = fork();
     if (p == 0) {
@@ -387,6 +483,9 @@ static void enc(char *buf, size_t n, int v) { snprintf(buf, n, "%d", ((v >> 8) &
 
 static void light_rgb(int r, int g, int b, int wait_for_it) {
     if (C.dry) { say("DRY rgb %d %d %d", r, g, b); return; }
+    char cmd[64];
+    snprintf(cmd, sizeof cmd, "rgb %d %d %d%s\n", r, g, b, wait_for_it ? " sync" : "");
+    if (helper_send(cmd, wait_for_it)) return;
     char er[16], eg[16], eb[16];
     enc(er, sizeof er, r); enc(eg, sizeof eg, g); enc(eb, sizeof eb, b);
     /* service call <svc> 78  i32 2 i32 <r>  i32 2 i32 <g>  i32 2 i32 <b>   (byte[2] = length, packed bytes) */
@@ -397,6 +496,9 @@ static void light_rgb(int r, int g, int b, int wait_for_it) {
 }
 static void light_config(int mode, int data, int wait_for_it) {
     if (C.dry) { say("DRY config mode %d data %d", mode, data); return; }
+    char cmd[64];
+    snprintf(cmd, sizeof cmd, "cfg %d %d%s\n", mode, data, wait_for_it ? " sync" : "");
+    if (helper_send(cmd, wait_for_it)) return;
     char m[16], v[16]; snprintf(m, sizeof m, "%d", mode); snprintf(v, sizeof v, "%d", data);
     char *a[] = {C.service_bin, "call", C.svc_name, "77", "i32", m, "i32", v, NULL};
     pid_t p = spawn(a, -1, wait_for_it);
@@ -451,8 +553,10 @@ static void base_from(const int *s) {
 }
 /* r g b brightness drive_mode, as the lamp reports them */
 static int read_lamp(int *out) {
-    char *req[] = {C.service_bin, "call", C.svc_name, "76", NULL};
-    spawn(req, -1, 1);
+    if (!helper_send("req sync\n", 1)) {
+        char *req[] = {C.service_bin, "call", C.svc_name, "76", NULL};
+        spawn(req, -1, 1);
+    }
     usleep(400 * 1000);
     int fd[2]; if (pipe(fd)) return 0;
     char *lc[] = {C.logcat_bin, "-d", "-v", "brief", "-s", "SystemService:D", NULL};
@@ -619,9 +723,9 @@ static Frame ana_block(Ana *a, const short *buf, int frames, long long t) {
     for (int i = 0; i < NFFT; i++) { a->re[i] = a->ring[i] * a->win[i]; a->im[i] = 0; }
     fft(a->re, a->im);
 
-    /* beat: beat-band energy, short average vs long average */
+    /* beat: beat-band energy, instant attack + smoothed release vs long average */
     double eb = band_energy(a->re, a->im, C.beat_low_hz, C.beat_high_hz);
-    a->beat_fast = 0.5 * a->beat_fast + 0.5 * eb;
+    a->beat_fast = eb > a->beat_fast ? eb : 0.5 * a->beat_fast + 0.5 * eb;
     double alpha_slow = BLOCK_MS / (double)C.beat_avg_ms;
     if (t < 1500) alpha_slow = alpha_slow * 4 > 0.5 ? 0.5 : alpha_slow * 4;   /* settle fast at start */
     if (a->beat_slow <= 0) a->beat_slow = eb;
@@ -684,16 +788,19 @@ static int wheel_next(int i, int step) {
     return i;
 }
 
+#define BEAT_GUARD_MS 40
+
 static void drive(Drv *d, Ana *a, Frame f, long long t) {
     int want_idx, want_level, wr = 0, wg = 0, wb = 0;
     if (f.beat && flash_enabled()) d->flash_until = t + C.flash_ms;
     int flashing = t < d->flash_until;
+    int pulse_mode = !strcmp(C.mode, "pulse");
 
     if (!strcmp(C.mode, "spectrum")) {
         if (f.band >= 0) { wr = C.bands[f.band].r; wg = C.bands[f.band].g; wb = C.bands[f.band].b; want_idx = 1000 + f.band; }
         else want_idx = d->idx;
         want_level = flashing ? C.bright_max : loud_level(a, f.db);
-    } else if (!strcmp(C.mode, "pulse")) {
+    } else if (pulse_mode) {
         double keep = pow(C.pulse_decay / 100.0, BLOCK_MS / 100.0);
         double hit = f.beat_ratio > 1 ? (f.beat_ratio - 1) / (C.sensitivity / 100.0 - 1 + 1e-6) : 0;
         if (hit > 1) hit = 1;
@@ -708,22 +815,25 @@ static void drive(Drv *d, Ana *a, Frame f, long long t) {
     }
 
     reap();
-    if (pending_pid) return;   /* one command in flight at a time */
+    if (pending_pid) return;   /* fallback service call still in flight */
 
+    int beat_iv = C.min_interval_ms < BEAT_GUARD_MS ? C.min_interval_ms : BEAT_GUARD_MS;
+    int col_iv = f.beat ? beat_iv : C.min_interval_ms;
     if (want_idx >= 0 && want_idx < 64) { wr = WHEEL_R[want_idx]; wg = WHEEL_G[want_idx]; wb = WHEEL_B[want_idx]; }
     int key = want_idx < 0 ? -1 : (wr << 16) | (wg << 8) | wb;
-    if (key >= 0 && key != d->sent_idx && t - d->last_color >= C.min_interval_ms) {
+    if (key >= 0 && key != d->sent_idx && t - d->last_color >= col_iv) {
         light_rgb(wr, wg, wb, 0);
         d->sent_idx = key; d->last_color = t;
         if (C.debug) {
             if (want_idx >= 1000) say("colour band %d-%dHz (%d,%d,%d)", C.bands[want_idx - 1000].lo, C.bands[want_idx - 1000].hi, wr, wg, wb);
             else say("colour #%d (%d,%d,%d)%s", want_idx, wr, wg, wb, f.beat ? " [beat]" : "");
         }
-        return;
+        if (pending_pid) return;
     }
     int diff = want_level - d->sent_level; if (diff < 0) diff = -diff;
     int edge = want_level == C.bright_max || want_level == C.bright_min;
-    if (want_level != d->sent_level && (d->sent_level < 0 || diff >= 2 || edge) && t - d->last_bright >= C.min_interval_ms) {
+    int br_iv = (f.beat && (flashing || pulse_mode)) ? beat_iv : C.min_interval_ms;
+    if (want_level != d->sent_level && (d->sent_level < 0 || diff >= 2 || edge || pulse_mode || (f.beat && flashing)) && t - d->last_bright >= br_iv) {
         light_bright_raw(want_level + 1, 0);
         d->sent_level = want_level; d->last_bright = t;
         if (C.debug >= 3) say("brightness %d", want_level);
@@ -1126,7 +1236,7 @@ int main(int argc, char **argv) {
             }
             int nz = 0; for (int i = 0; i < PERIOD * CH; i++) if (buf[i]) { nz = 1; break; }
             if (!nz) {
-                if (++zero_blocks >= 47 && t - last_fix >= 5000) {   /* ~1 s of digital zeros */
+                if (++zero_blocks * BLOCK_MS >= 1000 && t - last_fix >= 5000) {   /* ~1 s of digital zeros */
                     say("capture is all zeros while music plays — re-enabling loopback");
                     set_loopback(1); last_fix = t; zero_blocks = 0;
                 }
@@ -1162,6 +1272,7 @@ int main(int argc, char **argv) {
 
     say("stopping");
     if (lights_active) restore_base();
+    helper_stop();
     set_loopback(0);
     return 0;
 }

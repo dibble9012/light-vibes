@@ -1,7 +1,7 @@
 {
   "id": "light-vibes",
   "name": "Light Vibes",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "hmgapi": ">=1.0.0",
   "authors": ["Kyle"],
   "license": "AGPL-3.0",

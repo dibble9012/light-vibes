@@ -201,6 +201,7 @@ public class MainActivity extends Activity {
             modified = a.endsWith("*");
         }
         if (cfg.isEmpty()) applyPreset(FIRST_RUN_PRESET);
+        else if (!modified && active.startsWith("b:")) applyPreset(active);
     }
 
     /** enabled, debug and palette belong to the car, not to a preset. */
@@ -1127,7 +1128,7 @@ public class MainActivity extends Activity {
             tiles.add(slider("Colour smoothing", "Lower reacts faster, higher is calmer", "band_smoothing_ms", 120, 0, 600, 10, " ms"));
             tiles.add(slider("Colour stickiness", "How much louder a new band must get (white line)", "switch_margin", 30, 0, 200, 5, "%"));
         }
-        tiles.add(slider("Fastest light change", "Shortest time between changes", "min_interval_ms", 250, 150, 1000, 10, " ms"));
+        tiles.add(slider("Fastest light change", "Shortest time between changes", "min_interval_ms", 100, 50, 1000, 10, " ms"));
         if (!pulse) tiles.add(slider("Brightness swing", "Lower makes brightness more dramatic", "loudness_range_db", 12, 3, 24, 1, " dB"));
         addHeading("Light");
         addGrid(tiles);
