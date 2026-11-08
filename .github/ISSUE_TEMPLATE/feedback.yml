@@ -1,0 +1,22 @@
+name: Feedback or idea
+description: Something you'd like added or changed. The Feedback page in the app fills in the version box.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea
+      description: What would you like Light Vibes to do, or do differently?
+    validations:
+      required: true
+  - type: input
+    id: car
+    attributes:
+      label: Car
+      description: Model, year, country and trim, such as 2023 Kia EV6 GT-Line, US.
+  - type: textarea
+    id: about
+    attributes:
+      label: App and head unit
+      description: Filled in by the code in the app. No code? Say which version of Light Vibes you have.
+      render: text

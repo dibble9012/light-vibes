@@ -1,5 +1,7 @@
 package lightvibes.app;
 
+import static lightvibes.app.Ui.*;
+
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -14,7 +16,8 @@ import android.view.View;
  * brightness range. Fed one line at a time from the service; see meter_stream() in lightvibesd.c.
  */
 final class MeterView extends View {
-    private static final int CARD = 0xFF212329, TRACK = 0xFF34373E, TEXT = 0xFFE2E5E9, MUTED = 0xFF8F959C, ACCENT = 0xFF2AAAB9;
+    /** threshold lines and the beat flash: white on the dark theme, the text colour on the light one */
+    private static int markColour() { return night ? 0xFFFFFFFF : TEXT; }
     private static final float BAND_RANGE_DB = 30;
     private static final long STALE_MS = 800, FLASH_MS = 200, PEAK_HOLD_MS = 1000;
 
@@ -123,7 +126,7 @@ final class MeterView extends View {
             if (showLoudness) drawLoudness(c, left, y, right, y + rowH, live);
         }
         if (!live) {
-            paint.setColor(0xCC212329);
+            paint.setColor((CARD & 0x00FFFFFF) | 0xCC000000);
             rect.set(0, 0, w, h);
             c.drawRoundRect(rect, dp(8), dp(8), paint);
             paint.setColor(TEXT);
@@ -169,7 +172,7 @@ final class MeterView extends View {
         paint.setTextAlign(Paint.Align.LEFT);
         if (live) {
             float y = barBottom - clamp((line - top + BAND_RANGE_DB) / BAND_RANGE_DB) * (barBottom - t);
-            paint.setColor(Color.WHITE);
+            paint.setColor(markColour());
             c.drawRect(l, y - dp(1), r, y + dp(1), paint);
         }
     }
@@ -188,10 +191,10 @@ final class MeterView extends View {
             c.drawRoundRect(rect, dp(3), dp(3), paint);
         }
         float tick = x0 + clamp((sensitivity - 100) / (maxPct - 100)) * (x1 - x0);
-        paint.setColor(Color.WHITE);
+        paint.setColor(markColour());
         c.drawRect(tick - dp(1), y0 - dp(2), tick + dp(1), b - dp(2), paint);
         boolean flash = live && now - lastBeat < FLASH_MS;
-        paint.setColor(flash ? Color.WHITE : TRACK);
+        paint.setColor(flash ? markColour() : TRACK);
         c.drawCircle(r - dp(8), (y0 + b - dp(4)) / 2, dp(7), paint);
     }
 

@@ -18,7 +18,9 @@ SDK=${ANDROID_HOME:-/opt/homebrew/share/android-commandlinetools}
 BT=$(ls -d "$SDK"/build-tools/* | sort -V | tail -1)
 ANDROID_JAR=$SDK/platforms/android-19/android.jar
 AUTHOR_KEY=${HMGAPI_KEY:-$HOME/.hmgapi/author.key}
-HMGAPI_DIR=${HMGAPI_DIR:-../HMG-API}    # a checkout of github.com/VysseCodes/HMG-API, for tools/mknemesismod.sh
+if [ -z "${HMGAPI_DIR:-}" ]; then     # a checkout of github.com/VysseCodes/HMG-API, for tools/mknemesismod.sh
+    if [ -d third_party/HMG-API ]; then HMGAPI_DIR=third_party/HMG-API; else HMGAPI_DIR=../HMG-API; fi
+fi
 APP_KEYSTORE=$HOME/.hmgapi/light-vibes-app.keystore
 
 if [ ! -d "$TINY" ]; then
@@ -46,7 +48,7 @@ echo "== settings app"
 A=build/app
 rm -rf $A
 mkdir -p $A/classes $A/dex $A/assets/presets
-for p in lively marigold contrast pulse3 glow epic speed; do cp presets/$p.conf $A/assets/presets/; done
+for p in lively marigold contrast pulse3 glow epic speed power efficiency; do cp presets/$p.conf $A/assets/presets/; done
 javac --release 8 -nowarn -Xlint:-options -cp "$ANDROID_JAR" -d $A/classes app/src/lightvibes/app/*.java
 "$BT/d8" --release --min-api 19 --lib "$ANDROID_JAR" --output $A/dex $(find $A/classes -name '*.class')
 "$BT/aapt" package -f -M app/AndroidManifest.xml -S app/res -A $A/assets -I "$ANDROID_JAR" -F $A/unsigned.apk
@@ -65,7 +67,7 @@ echo "== mod"
 M=build/mod
 rm -rf $M
 mkdir -p $M/app $M/defaults
-cp mod/mod.json mod/lights.sh build/lightvibesd $M/
+cp mod/mod.json mod/lights.sh mod/open.sh build/lightvibesd $M/
 cp $A/LightVibes.apk $M/app/
 python3 tools/make_icons.py $M/icons
 # defaults until the app has been opened: the lively preset, one value per file
@@ -78,9 +80,12 @@ python3 tools/sign.py $M dist "$AUTHOR_KEY" "$HMGAPI_DIR"
 if [ "${1:-}" = test ]; then
     echo "== host test"
     # the analysis never calls tinyalsa, whose sources need Linux headers: leave its symbols unresolved
-    cc -O2 -I$TINY/include -o build/lightvibesd-host src/lightvibesd.c -lm -Wl,-undefined,dynamic_lookup
-    cc -O1 -I$TINY/include -o build/test_lamp test/test_lamp.c -lm -Wl,-undefined,dynamic_lookup
+    cc -O2 -I$TINY/include -o build/lightvibesd-host src/lightvibesd.c -lm -lpthread -Wl,-undefined,dynamic_lookup
+    cc -O1 -I$TINY/include -o build/test_lamp test/test_lamp.c -lm -lpthread -Wl,-undefined,dynamic_lookup
     build/test_lamp
+    mkdir -p build/rt
+    javac --release 8 -nowarn -Xlint:-options -d build/rt app/src/lightvibes/app/QrCode.java app/src/lightvibes/app/Report.java test/ReportTest.java
+    java -cp build/rt lightvibes.app.ReportTest
     [ -f build/song.raw ] || python3 test/make_test_audio.py build/song.raw
     beats=$(build/lightvibesd-host --analyze build/song.raw | grep -c BEAT || true)
     echo "beat mode: $beats beats detected (expect ~24)"

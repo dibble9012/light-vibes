@@ -1,0 +1,42 @@
+name: Problem with the lights
+description: Colours or brightness not changing, or anything else not working. The Report a problem page in the app fills in the first box.
+labels: [bug]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Report from the app
+      description: Scan the code on the Report a problem page and this fills in by itself. No code? Say which version of Light Vibes and HMG-API you have.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: car
+    attributes:
+      label: Car
+      description: Model, year, country and trim, such as 2023 Kia EV6 GT-Line, US.
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens?
+      description: What you expected, what the lights did, and what was playing (wired or wireless CarPlay, Android Auto, USB, Bluetooth).
+    validations:
+      required: true
+  - type: dropdown
+    id: settings
+    attributes:
+      label: Does the colour change from the car's own Settings?
+      description: Settings > Vehicle > Lights > Ambient light.
+      options:
+        - "Yes"
+        - "No"
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: file
+    attributes:
+      label: Report file (optional)
+      description: With a USB stick in when you run the test, the file is in the "Light Vibes reports" folder. Drag it here.

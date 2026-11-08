@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="lightvibes.app" android:versionCode="1" android:versionName="0.5.0">
+    package="lightvibes.app" android:versionCode="60" android:versionName="0.6.0">
     <uses-sdk android:minSdkVersion="19" android:targetSdkVersion="19"/>
     <!-- this head unit's Activity.finish() (so the back button too) checks it: without it the app crashes -->
     <uses-permission android:name="android.permission.GET_TASKS"/>
@@ -8,7 +8,7 @@
         android:theme="@android:style/Theme.Holo.NoActionBar" android:allowBackup="false">
         <!-- newer Android (the emulator) squeezes old apps without this; the car ignores it -->
         <meta-data android:name="android.max_aspect" android:value="4.0"/>
-        <activity android:name=".MainActivity" android:label="Light Vibes"
+        <activity android:name=".MainActivity" android:label="Light Vibes" android:launchMode="singleTask"
             android:screenOrientation="landscape" android:configChanges="keyboardHidden|orientation|screenSize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
