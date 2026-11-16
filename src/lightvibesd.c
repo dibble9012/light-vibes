@@ -56,7 +56,7 @@
 #include <pthread.h>
 #include <tinyalsa/asoundlib.h>
 
-#define VERSION "0.6.0"
+#define VERSION "0.6.3"
 #define MAX_RATE 48000
 static int rate = MAX_RATE;   /* the capture side only runs at the rate playback is using */
 #define SOURCE_START_MS 2000  /* Android-mixer audio must last this long: it also carries short system sounds */
@@ -157,7 +157,7 @@ static void str_lower(char *s) {
 }
 static const char *match_make(const char *s) {
     if (strstr(s, "neev") || strstr(s, "ceev") || strstr(s, "ioniq") || strstr(s, "ecohmc") || strstr(s, "hyundai")) return "hyundai";
-    if (strstr(s, "cvev") || strstr(s, "dl3") || strstr(s, "ev6") || strstr(s, "ecokia") || strstr(s, "kia")) return "kia";
+    if (strstr(s, "cvev") || strstr(s, "sg2ev") || strstr(s, "dl3") || strstr(s, "ev6") || strstr(s, "ecokia") || strstr(s, "kia")) return "kia";
     return NULL;
 }
 static const char *detect_palette(void) {
@@ -1188,21 +1188,31 @@ static void meter_listen(void) {
     fcntl(s, F_SETFL, O_NONBLOCK); fcntl(s, F_SETFD, FD_CLOEXEC);
     meter_srv = s;
 }
+/* the drive history (energy thread) sends on it too */
+static pthread_mutex_t meter_mu = PTHREAD_MUTEX_INITIALIZER;
+static void history_hello(int fd);
 static void meter_accept(void) {
     if (meter_srv < 0) return;
+    int fresh[METER_CLIENTS], nf = 0;
+    pthread_mutex_lock(&meter_mu);
     for (int c; (c = accept(meter_srv, NULL, NULL)) >= 0; ) {
         fcntl(c, F_SETFL, O_NONBLOCK); fcntl(c, F_SETFD, FD_CLOEXEC);
         int slot = -1;
         for (int i = 0; i < METER_CLIENTS; i++) if (meter_cl[i] < 0) { slot = i; break; }
         if (slot < 0) { slot = meter_oldest; close(meter_cl[slot]); meter_oldest = (slot + 1) % METER_CLIENTS; }
         meter_cl[slot] = c;
+        if (nf < METER_CLIENTS) fresh[nf++] = c;
     }
+    pthread_mutex_unlock(&meter_mu);
+    for (int i = 0; i < nf; i++) history_hello(fresh[i]);
 }
 static void meter_broadcast(const char *b, int n) {
+    pthread_mutex_lock(&meter_mu);
     for (int i = 0; i < METER_CLIENTS; i++) {
         if (meter_cl[i] < 0) continue;
         if (send(meter_cl[i], b, n, MSG_DONTWAIT | MSG_NOSIGNAL) < 0 && errno != EAGAIN) { close(meter_cl[i]); meter_cl[i] = -1; }
     }
+    pthread_mutex_unlock(&meter_mu);
 }
 typedef struct { long long last; int beats; double peak; } MeterStream;
 /* db average_db beat_peak beats selected_band nbands band_db... */
@@ -1712,11 +1722,109 @@ static void energy_sample(int full) {
     pthread_mutex_unlock(&en_mu);
     if (new_trip) say("car is READY again: new trip");
 }
+/* ---------- drive history, for the graphs on the Speed, Power and Efficiency tuning pages ----------
+   Every second while the car is on, whatever mode is on: speed, power and both efficiencies, so the app can show what the
+   light did, or would have done, with the colours set now. drive_0 is the current or last drive, drive_1 the one before.
+   A drive is a trip (one boot, or READY again); one shorter than a minute is replaced rather than kept. Rows are buffered
+   and appended every 30 s, so a power cut loses at most that. Each row also goes out on the meter socket as it's taken
+   ("hist <row>"), and a client that connects gets "histdrive <start epoch>" and the rows not on disk yet, so the app's
+   graph is live without writing to flash every second.
+   File: "# drive <boot> <odometer at start> <start epoch>", then "<epoch> <km/h> <kW> <trip mi/kWh> <average mi/kWh>",
+   "-" for a reading there wasn't. Public, like the units: the app reads it. */
+static int read_power(double *kw);
+static int read_trip_eff(double *v, int want_km);
+static int read_avg_eff(double *v, int want_km);
+#define HISTORY_EVERY_MS 1000
+#define HISTORY_FLUSH_ROWS 30
+#define HISTORY_MAX_ROWS 28800              /* 8 hours */
+#define HISTORY_MIN_ROWS 60                 /* a minute: shorter drives don't push the one before out */
+static const char *history_dir = "/data/hmgapi/public/light-vibes";
+static pthread_mutex_t hist_mu = PTHREAD_MUTEX_INITIALIZER;
+static struct { char key[96]; int rows; long long start; char buf[HISTORY_FLUSH_ROWS * 64 + 64]; int nbuf; long long avg_t; double avg; int avg_ok; } hist;
+static void history_path(char *out, size_t n, int which) { snprintf(out, n, "%s/drive_%d.csv", history_dir, which); }
+static void history_flush(void) {       /* with hist_mu held */
+    if (!hist.nbuf) return;
+    char p[320]; history_path(p, sizeof p, 0);
+    FILE *f = fopen(p, "a");
+    if (f) { fwrite(hist.buf, 1, hist.nbuf, f); fclose(f); chmod(p, 0644); }
+    hist.nbuf = 0;
+}
+/* the file's drive, and how many rows it has: carries on after a service restart mid-drive */
+static void history_open(const char *key) {
+    char p[320], line[160]; history_path(p, sizeof p, 0);
+    FILE *f = fopen(p, "r"); int rows = 0; char fkey[96] = ""; long long fstart = 0;
+    if (f) {
+        if (fgets(line, sizeof line, f) && !strncmp(line, "# drive ", 8)) {
+            char b[64]; long long o; if (sscanf(line + 8, "%63s %lld %lld", b, &o, &fstart) >= 2) snprintf(fkey, sizeof fkey, "%s %lld", b, o);
+        }
+        while (fgets(line, sizeof line, f)) if (line[0] != '#') rows++;
+        fclose(f);
+    }
+    if (fkey[0] && !strcmp(fkey, key)) { snprintf(hist.key, sizeof hist.key, "%s", key); hist.rows = rows; hist.start = fstart; return; }
+    mkdir(history_dir, 0755); chmod(history_dir, 0755);
+    if (fkey[0] && rows >= HISTORY_MIN_ROWS) { char p1[320]; history_path(p1, sizeof p1, 1); rename(p, p1); }
+    hist.start = time(NULL);
+    f = fopen(p, "w");
+    if (f) { fprintf(f, "# drive %s %lld\n", key, hist.start); fclose(f); chmod(p, 0644); }
+    snprintf(hist.key, sizeof hist.key, "%s", key); hist.rows = 0;
+    say("drive history: new drive");
+}
+static void fmt_val(char *out, size_t n, int ok, double v, const char *f) { if (ok > 0) snprintf(out, n, f, v); else snprintf(out, n, "-"); }
+static void history_tick(void) {
+    pthread_mutex_lock(&en_mu);
+    int ready = en.ready, have = en.have_odo; long long odo0 = en.odo0; char boot[48]; snprintf(boot, sizeof boot, "%s", en.boot);
+    pthread_mutex_unlock(&en_mu);
+    if (ready == 0 || !have) return;           /* off, or no odometer yet to tell drives apart */
+    char key[96]; snprintf(key, sizeof key, "%s %lld", boot, odo0);
+    double sp = 0, kw = 0, trip = 0; long long t = now_ms();
+    int sp_ok = read_speed(&sp), kw_ok = read_power(&kw), trip_ok = read_trip_eff(&trip, 0);
+    if (!hist.avg_t || t - hist.avg_t >= 10000) { hist.avg_ok = read_avg_eff(&hist.avg, 0); hist.avg_t = t; }   /* moves slowly */
+    char a[24], b[24], c[24], d[24];
+    fmt_val(a, sizeof a, sp_ok, sp, "%.1f"); fmt_val(b, sizeof b, kw_ok, kw, "%.1f");
+    fmt_val(c, sizeof c, trip_ok, trip, "%.2f"); fmt_val(d, sizeof d, hist.avg_ok, hist.avg, "%.2f");
+    char row[128]; int rn = 0, fresh = 0; long long start;
+    pthread_mutex_lock(&hist_mu);
+    if (strcmp(hist.key, key)) { history_flush(); history_open(key); fresh = 1; }
+    start = hist.start;
+    if (hist.rows < HISTORY_MAX_ROWS) {
+        rn = snprintf(row, sizeof row, "%lld %s %s %s %s\n", (long long)time(NULL), a, b, c, d);
+        if (hist.nbuf > (int)sizeof hist.buf - rn - 1) history_flush();
+        memcpy(hist.buf + hist.nbuf, row, rn); hist.nbuf += rn;
+        hist.rows++;
+        if (hist.nbuf >= HISTORY_FLUSH_ROWS * 40) history_flush();
+    }
+    pthread_mutex_unlock(&hist_mu);
+    char m[160]; int mn;
+    if (fresh) { mn = snprintf(m, sizeof m, "histdrive %lld\n", start); meter_broadcast(m, mn); }
+    if (rn) { mn = snprintf(m, sizeof m, "hist %s", row); meter_broadcast(m, mn); }
+}
+/* a new meter client: which drive, and the rows not written to the file yet (the app reads the rest from it) */
+static void history_hello(int fd) {
+    char out[sizeof hist.buf + 2 * HISTORY_FLUSH_ROWS * 8 + 64]; int n = 0;
+    pthread_mutex_lock(&hist_mu);
+    if (hist.key[0]) {
+        n = snprintf(out, sizeof out, "histdrive %lld\n", hist.start);
+        for (int i = 0; i < hist.nbuf && n < (int)sizeof out - 8; ) {
+            const char *nl = memchr(hist.buf + i, '\n', hist.nbuf - i);
+            int len = nl ? (int)(nl - (hist.buf + i)) + 1 : hist.nbuf - i;
+            if (n + 5 + len >= (int)sizeof out) break;
+            memcpy(out + n, "hist ", 5); n += 5;
+            memcpy(out + n, hist.buf + i, len); n += len;
+            i += len;
+        }
+    }
+    pthread_mutex_unlock(&hist_mu);
+    if (n) send(fd, out, n, MSG_DONTWAIT | MSG_NOSIGNAL);
+}
+static void history_stop(void) { pthread_mutex_lock(&hist_mu); history_flush(); pthread_mutex_unlock(&hist_mu); }
+
 static void *energy_thread(void *arg) {
     (void)arg;
+    long long last_hist = 0;
     for (int n = 0; ; n++) {
         long long t0 = now_ms();
         energy_sample(n % (1000 / ENERGY_TICK_MS) == 0);
+        if (t0 - last_hist >= HISTORY_EVERY_MS) { last_hist = t0; history_tick(); }
         long long left = ENERGY_TICK_MS - (now_ms() - t0);
         if (left > 0) usleep(left * 1000);
     }
@@ -2150,6 +2258,7 @@ int main(int argc, char **argv) {
     say("stopping");
     /* HMG-API's stop reaches the helper too (same process group): the putting back goes through service call */
     helper_stop(); helper_failed = 1;
+    history_stop();
     if (lights_active) restore_base();
     original_restore();
     set_loopback(0);

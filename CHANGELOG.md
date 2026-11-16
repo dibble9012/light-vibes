@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.3
+
+- **Kia Niro EV (2023)** is now listed as compatible in the NEMESIS Package Store, and uses the Kia colours.
+- **Current Drive graph** on the Speed, Power and Efficiency **Tuning** tabs: the drive so far, drawn in the
+  colour the ambient light had, or would have had, at each moment with your current colours and range. It
+  updates live, every second, while the page is open, and recolours as you move the range. Light Vibes records
+  speed, power and efficiency while the car is on, whatever mode you use.
+
 ## 0.6.0
 
 ### New cars

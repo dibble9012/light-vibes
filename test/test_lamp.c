@@ -163,6 +163,8 @@ int main(void) {
         assert(!strcmp(detect_palette(), "hyundai"));
         write_file(bp, "ro.product.device=wp_daudioplus_neev23se_us\n");
         assert(!strcmp(detect_palette(), "hyundai"));
+        write_file(bp, "ro.product.name=wp_daudioplus_kia_us\nro.build.product=KIA.USA.0000.V015.012.260507\n");   /* the Niro EV's file */
+        assert(!strcmp(detect_palette(), "kia"));
         write_file(bp, "ro.build.product=CEEV.USA.S5W_M.V001.001.260507\n");
         assert(!strcmp(detect_palette(), "hyundai"));
         snprintf(C.palette, sizeof C.palette, "kia");
@@ -296,6 +298,46 @@ int main(void) {
     energy_sample(1);
     assert(read_trip_eff(&ev, 0) == -1 && !read_avg_eff(&ev, 0));
     struct stat est; assert(!stat(ep, &est) && est.st_size > 0);     /* the moving samples were logged */
+
+    /* drive history: rows while the car is on, a new file for each drive, the one before kept unless it was too short */
+    {
+        static char hd[200]; snprintf(hd, sizeof hd, "%s/hist", lamp_dir); history_dir = hd;
+        char d0[300], d1[300]; snprintf(d0, sizeof d0, "%s/drive_0.csv", hd); snprintf(d1, sizeof d1, "%s/drive_1.csv", hd);
+        #define ROWS(path) ({ FILE *f_ = fopen(path, "r"); int n_ = -1; char l_[200]; if (f_) { n_ = 0; while (fgets(l_, sizeof l_, f_)) if (l_[0] != '#') n_++; fclose(f_); } n_; })
+        write_file(bp, "boot-3\n"); trip_begin(); memset(&hist, 0, sizeof hist);
+        write_file(hp, "12 2\n31 2000\n44 0\n66 0\n71 0\n72 0\n89 0\n90 0\n1 2\n2 30\n");
+        energy_sample(1); history_tick(); history_stop();
+        assert(ROWS(d0) == -1);                                       /* car off: nothing */
+        write_file(hp, "12 2\n31 2000\n44 1\n66 0\n71 0\n72 0\n89 0\n90 0\n1 2\n2 30\n");
+        energy_sample(1);
+        for (int i = 0; i < 70; i++) history_tick();
+        /* a client connecting now hears which drive, and the rows not on disk yet */
+        int sv2[2]; assert(!socketpair(AF_UNIX, SOCK_STREAM, 0, sv2));
+        history_hello(sv2[0]);
+        char hb[4096]; int hn = (int)recv(sv2[1], hb, sizeof hb - 1, MSG_DONTWAIT); assert(hn > 0); hb[hn] = 0;
+        assert(!strncmp(hb, "histdrive ", 10) && strstr(hb, "\nhist ") != NULL);
+        int buffered = 0; for (char *q = hb; (q = strstr(q, "\nhist ")); q++) buffered++;
+        assert(buffered > 0 && buffered < 70);                       /* only what the file lacks */
+        close(sv2[0]); close(sv2[1]);
+        history_stop();
+        assert(ROWS(d0) == 70);
+        FILE *hf = fopen(d0, "r"); char hl[200]; assert(hf && fgets(hl, sizeof hl, hf) && !strncmp(hl, "# drive boot-3 2000 ", 20));
+        assert(fgets(hl, sizeof hl, hf)); fclose(hf);
+        long long ts; char sp[16], kw[16], tr[16], av[16];
+        assert(sscanf(hl, "%lld %15s %15s %15s %15s", &ts, sp, kw, tr, av) == 5 && !strcmp(sp, "-") && !strcmp(tr, "-") && !strcmp(av, "3.00"));
+        memset(&hist, 0, sizeof hist);                                /* the service restarts mid-drive: same file */
+        history_tick(); history_stop();
+        assert(ROWS(d0) == 71 && ROWS(d1) == -1);
+        write_file(bp, "boot-4\n"); trip_begin(); energy_sample(1);   /* the next drive */
+        for (int i = 0; i < 5; i++) history_tick();
+        history_stop();
+        assert(ROWS(d0) == 5 && ROWS(d1) == 71);
+        write_file(bp, "boot-5\n"); trip_begin(); energy_sample(1);   /* that one was too short to keep */
+        for (int i = 0; i < 3; i++) history_tick();
+        history_stop();
+        assert(ROWS(d0) == 3 && ROWS(d1) == 71);
+        history_dir = "/nonexistent";
+    }
 
     /* speed/power/efficiency brightness: Auto turns on the car's "dimmed in dark", a level turns it off, and the
        owner's setting comes back with their colour */

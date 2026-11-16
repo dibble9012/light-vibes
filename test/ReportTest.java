@@ -9,7 +9,7 @@ public class ReportTest {
         if (!ok) throw new AssertionError(what);
     }
 
-    static final String BASE = "stage=done\nv=0.6.0\nproduct=SG2EV.USA.0000.V015.012.260507\nname=x\nusm=0\nhmg=1.0.2\nmods=auto-dst,auto-heat-and-cool-seats,nemesis-shortcut,wireless-carplay-aa\n"
+    static final String BASE = "stage=done\nv=0.6.3\nproduct=SG2EV.USA.0000.V015.012.260507\nname=x\nusm=0\nhmg=1.0.2\nmods=auto-dst,auto-heat-and-cool-seats,nemesis-shortcut,wireless-carplay-aa\n"
             + "mode=spectrum\nenabled=1\nrange=3-10\nloop=on\nrate=0\nsongs=4\npeak=-14\nsilence=-55\nsent=120/88\nchk=3/0/0/0\nsvc=00000000\nreply=1\nuser=255,68,35,2,1\ndim=1\nc=3/3\ndm=1\nb=3/3\nrestored=1\n";
 
     public static void main(String[] a) throws Exception {

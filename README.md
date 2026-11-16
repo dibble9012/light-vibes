@@ -8,7 +8,7 @@ What's new in each version is in the [changelog](CHANGELOG.md).
 
 **[Download the latest release](https://github.com/dibble9012/light-vibes/releases/latest)**
 
-Supports the Kia EV6, Hyundai Ioniq 5 and Hyundai Ioniq 6 (USA Gen5W head units). Light Vibes detects
+Supports the Kia EV6, Kia Niro EV (2023), Hyundai Ioniq 5 and Hyundai Ioniq 6 (USA Gen5W head units). Light Vibes detects
 the car and uses its own 64 factory ambient colours, which differ between Kia and Hyundai. It's been
 used most on a 2023 Kia EV6 GT-Line. This is an early version, and some parts
 haven't been tried on the car yet: see [What's been tested](#whats-been-tested).
@@ -23,9 +23,9 @@ ADB over USB has to be off, or the port can't read the drive.
 
 ### With the HMG-API app
 
-1. Download `light-vibes-v0.6.0-hmgapi-usb.zip`.
+1. Download `light-vibes-v0.6.3-hmgapi-usb.zip`.
 2. Unzip it onto the top level of a FAT32 flash drive, so the drive has
-   `HMGAPI/updates/light-vibes-v0.6.0.zip`.
+   `HMGAPI/updates/light-vibes-v0.6.3.zip`.
 3. Plug the drive into the car and install the mod from the updates page in the HMG-API app.
 4. Tap **Apply changes** in the app, then **Restart unit**. The Light Vibes tile appears on the
    home screen after the restart.
@@ -34,7 +34,7 @@ To remove the mod, use the HMG-API app.
 
 ### With NEMESIS
 
-1. Download `light-vibes-v0.6.0-nemesis-usb.zip`.
+1. Download `light-vibes-v0.6.3-nemesis-usb.zip`.
 2. Unzip it onto the top level of a FAT32 or exFAT flash drive, so the drive has `NEMESIS.data`
    and the `packages` folder at its top level. Keep only one NEMESIS package on the drive.
 3. Once Android is up, plug the drive into the car and confirm the install of "Light Vibes".
@@ -91,6 +91,10 @@ the slider's **Now** shows the current reading.
   Trip**, worked out by Light Vibes since the car was started, or **Car Average**, the same average
   the cluster shows.
 - Each has its own brightness, or the car's **Dimmed in Dark**.
+- The **Tuning** tab shows a **Current Drive** graph: the reading over the drive so far, in the colour the
+  light had, or would have had, at each moment with the colours and range set now. It updates every second
+  while the page is open. Light Vibes records speed, power and efficiency while the car is on, whatever mode
+  you use.
 
 ### Presets
 
@@ -202,8 +206,8 @@ package. tinyalsa is cloned into `third_party/` at a pinned commit.
 HMGAPI_DIR=../HMG-API ./build.sh
 ```
 
-This writes the two release files to `dist/`, along with `light-vibes-v0.6.0.hmgapi.zip`, the signed
-mod inside them, and `light-vibes-v0.6.0-nemesis-package.zip`, the file to upload to the NEMESIS
+This writes the two release files to `dist/`, along with `light-vibes-v0.6.3.hmgapi.zip`, the signed
+mod inside them, and `light-vibes-v0.6.3-nemesis-package.zip`, the file to upload to the NEMESIS
 Package Store. It signs the mod with `~/.hmgapi/author.key` and the app with
 `~/.hmgapi/light-vibes-app.keystore`, which it makes on the first build. Updates must be signed with
 the same keys as the first install.

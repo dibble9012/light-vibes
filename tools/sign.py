@@ -14,8 +14,8 @@ import base64, hashlib, json, os, shutil, subprocess, sys, tempfile, zipfile
 
 # what NEMESIS's store shows as compatible: only what the mod was tested on. A glob of
 # ro.build.product, and the unit's /system/onebin folder name.
-TESTED_OS = "CVEV.USA.*.*,NEEV.USA.*.*,NEEV23.USA.*.*,NEEV23SE.USA.*.*,CEEV.USA.*.*"
-TESTED_MODELS = "cvev_us,neev_us,neev23_us,neev23se_us,ceev_us"
+TESTED_OS = "CVEV.USA.*.*,SG2EV.USA.*.*,NEEV.USA.*.*,NEEV23.USA.*.*,NEEV23SE.USA.*.*,CEEV.USA.*.*"
+TESTED_MODELS = "cvev_us,sg2ev_us,neev_us,neev23_us,neev23se_us,ceev_us"
 
 META = "META-HMGAPI"
 

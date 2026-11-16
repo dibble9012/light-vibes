@@ -227,7 +227,7 @@ public class MainActivity extends Activity {
         if (s == null) return null;
         String l = s.toLowerCase();
         if (l.contains("neev") || l.contains("ceev") || l.contains("ioniq") || l.contains("ecohmc") || l.contains("hyundai")) return "hyundai";
-        if (l.contains("cvev") || l.contains("dl3") || l.contains("ev6") || l.contains("ecokia") || l.contains("kia")) return "kia";
+        if (l.contains("cvev") || l.contains("sg2ev") || l.contains("dl3") || l.contains("ev6") || l.contains("ecokia") || l.contains("kia")) return "kia";
         return null;
     }
 
@@ -658,6 +658,7 @@ public class MainActivity extends Activity {
         editorTop.addView(pageTabs());
         String mode = mode();
         speedNow = null;
+        history = null;
         syncMeter();
         Gauge g = Gauge.of(mode);
         if (g != null) {
@@ -1326,6 +1327,69 @@ public class MainActivity extends Activity {
         speedNow.setGravity(Gravity.RIGHT);
         int[] values = {speedValue(cfg, g.lowKey, g.lowDef), speedValue(cfg, g.highKey, g.highDef)};
         addRange(g, values, km, null, gaugeColours(g));
+        addHistory(g, values, km);
+    }
+
+    /** the drive graph on the page (null when there isn't one), kept live from the meter socket */
+    private HistoryView history;
+    private TextView historyCaption;
+    private long historyReloadedFor;
+
+    /**
+     * The current drive, a line in the colour the light had, or would have had, with the colours and range set now.
+     * lightvibesd records it whatever mode is on; new rows arrive each second while the page is open.
+     */
+    private void addHistory(final Gauge g, int[] values, final boolean km) {
+        TextView title = text("Current Drive", 16, MUTED);
+        title.setPadding(0, dp(14), 0, dp(2));
+        editor.addView(title);
+        HistoryView.Drive d = HistoryView.load();
+        historyCaption = text(d.n >= 2 ? HistoryView.describe(d) : "Fills in as you drive: Light Vibes records speed, power and efficiency while the car is on, whatever mode you use.", 14, TEXT);
+        historyCaption.setPadding(0, dp(2), 0, dp(4));
+        editor.addView(historyCaption);
+        final int[] colours = gaugeColours(g);
+        final boolean trip = "trip".equals(cfg.get("eff_source"));
+        final HistoryView hv = new HistoryView(this);
+        final double div = g.divisor;
+        hv.set(d, new HistoryView.Reading() {
+            @Override public double of(HistoryView.Drive dr, int i) {   // recorded in km/h and mi/kWh
+                if (g == Gauge.SPEED) return km ? dr.speed[i] : dr.speed[i] / 1.609344;
+                if (g == Gauge.POWER) return dr.power[i];
+                double v = trip ? dr.trip[i] : dr.avg[i];
+                return km ? v * 1.609344 : v;
+            }
+        }, values[0] / div, values[1] / div, g == Gauge.POWER, new HistoryView.Colours() {
+            @Override public int at(double value) {
+                double lo = hv.low(), hi = hv.high();
+                double x = hi > lo ? (value - lo) / (hi - lo) : 0;
+                x = Math.max(0, Math.min(1, x));
+                return wheelColour(g.colourAt(colours, (int) Math.round(lo * div), (int) Math.round(hi * div), x));
+            }
+        });
+        editor.addView(hv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(200)));
+        history = hv;
+        // a fresh connection: lightvibesd sends the rows it hasn't written to the file yet, then each new one
+        meterThread = null;
+        syncMeter();
+    }
+
+    /** a line from the meter socket for the drive graph: "histdrive <start>" (a new drive) or "hist <row>" */
+    private void historyLine(String l) {
+        if (history == null || history.getParent() == null) return;
+        HistoryView.Drive d = history.drive();
+        if (l.startsWith("histdrive ")) {
+            long start = 0;
+            try { start = Long.parseLong(l.substring(10).trim()); } catch (NumberFormatException ignored) { }
+            if (start != 0 && start != d.start && start != historyReloadedFor) {   // a new drive since the page was opened
+                historyReloadedFor = start;
+                refreshEditor();
+            }
+            return;
+        }
+        if (d.add(l.substring(5))) {
+            history.invalidate();
+            if (d.n >= 2) historyCaption.setText(HistoryView.describe(d));
+        }
     }
 
     private static void drawFade(LinearLayout fade, Gauge g, int[] colours, int low, int high) {
@@ -1377,6 +1441,7 @@ public class MainActivity extends Activity {
             @Override public void moved(int low, int high) {
                 label.setText(prefix + g.show(low) + " to " + g.show(high) + " " + unit);
                 if (fade != null) drawFade(fade, g, colours, low, high);
+                if (history != null) history.setRange(low / (double) g.divisor, high / (double) g.divisor);
             }
             @Override public void done(int low, int high) {
                 cfg.put(g.highKey, String.valueOf(high));
@@ -1492,7 +1557,8 @@ public class MainActivity extends Activity {
                         final String l = line;
                         handler.post(new Runnable() {     // not meter.post: it never runs while the meter isn't on screen
                             @Override public void run() {
-                                if (l.startsWith("speed ") || l.startsWith("power ") || l.startsWith("eff ")) showGauge(l);
+                                if (l.startsWith("hist")) historyLine(l);
+                                else if (l.startsWith("speed ") || l.startsWith("power ") || l.startsWith("eff ")) showGauge(l);
                                 else meter.update(l);
                             }
                         });
