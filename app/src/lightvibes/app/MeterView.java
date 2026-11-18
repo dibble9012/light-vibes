@@ -30,7 +30,7 @@ final class MeterView extends View {
     private String[] names = new String[0];
     private int marginPercent, sensitivity, rangeDb;
 
-    private float db, avgDb, beatPeak, heldPeak;
+    private float db, avgDb, beatPeak, heldPeak, bpm, bpmConf;
     private float[] bandDb = new float[0];
     private int selected = -1;
     private long lastData, lastBeat, heldAt;
@@ -59,7 +59,7 @@ final class MeterView extends View {
         invalidate();
     }
 
-    /** db average_db beat_peak beats selected_band nbands band_db... */
+    /** db average_db beat_peak beats selected_band nbands band_db... [bpm bpm_conf tune_rem_s] */
     void update(String line) {
         String[] p = line.trim().split(" ");
         if (p.length < 6) return;
@@ -74,6 +74,13 @@ final class MeterView extends View {
             float[] levels = new float[n];
             for (int i = 0; i < n; i++) levels[i] = Float.parseFloat(p[6 + i]);
             bandDb = levels;
+            if (p.length >= 6 + n + 2) {
+                bpm = Float.parseFloat(p[6 + n]);
+                bpmConf = Float.parseFloat(p[6 + n + 1]);
+            } else {
+                bpm = 0;
+                bpmConf = 0;
+            }
             long now = SystemClock.uptimeMillis();
             lastData = now;
             if (beats > 0) lastBeat = now;
@@ -101,24 +108,30 @@ final class MeterView extends View {
     }
 
     @Override protected void onDraw(Canvas c) {
-        float w = getWidth(), h = getHeight(), pad = dp(10);
+        float w = getWidth(), h = getHeight(), pad = dp(10), rad = dp(14);
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(CARD);
         rect.set(0, 0, w, h);
-        c.drawRoundRect(rect, dp(8), dp(8), paint);
+        c.drawRoundRect(rect, rad, rad, paint);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(dp(1));
+        paint.setColor(RULE);
+        rect.set(dp(0.5f), dp(0.5f), w - dp(0.5f), h - dp(0.5f));
+        c.drawRoundRect(rect, rad, rad, paint);
+        paint.setStyle(Paint.Style.FILL);
 
         long now = SystemClock.uptimeMillis();
         boolean live = lastData != 0 && now - lastData < STALE_MS;
 
-        float left = pad, right = w - pad;
+        float left = pad + dp(2), right = w - pad - dp(2);
         if (showBands) {
-            float end = showBeat || showLoudness ? w * 0.58f : right;
-            drawBands(c, left, pad / 2, end, h - pad / 2, live);
+            float end = showBeat || showLoudness ? w * 0.56f : right;
+            drawBands(c, left, dp(6), end, h - dp(6), live);
             left = end + dp(14);
         }
         int rows = (showBeat ? 1 : 0) + (showLoudness ? 1 : 0);
         if (rows > 0) {
-            float rowH = (h - pad) / rows, y = pad / 2;
+            float rowH = (h - dp(10)) / rows, y = dp(5);
             if (showBeat) {
                 drawBeat(c, left, y, right, y + rowH, live, now);
                 y += rowH;
@@ -126,13 +139,13 @@ final class MeterView extends View {
             if (showLoudness) drawLoudness(c, left, y, right, y + rowH, live);
         }
         if (!live) {
-            paint.setColor((CARD & 0x00FFFFFF) | 0xCC000000);
-            rect.set(0, 0, w, h);
-            c.drawRoundRect(rect, dp(8), dp(8), paint);
-            paint.setColor(TEXT);
-            paint.setTextSize(dp(17));
+            paint.setColor((CARD & 0x00FFFFFF) | 0xD8000000);
+            rect.set(dp(1), dp(1), w - dp(1), h - dp(1));
+            c.drawRoundRect(rect, rad - dp(1), rad - dp(1), paint);
+            paint.setColor(MUTED);
+            paint.setTextSize(dp(14.5f));
             paint.setTextAlign(Paint.Align.CENTER);
-            c.drawText("Meter starts when music plays", w / 2, h / 2 + dp(6), paint);
+            c.drawText("Live audio meter · starts when music plays", w / 2, h / 2 + dp(5), paint);
             paint.setTextAlign(Paint.Align.LEFT);
         }
     }
@@ -179,7 +192,8 @@ final class MeterView extends View {
 
     private void drawBeat(Canvas c, float l, float t, float r, float b, boolean live, long now) {
         float maxPct = Math.max(400, sensitivity * 1.5f);
-        float y0 = rowBar(c, l, t, r, b, "Beat peak", live ? Math.round(heldPeak * 100) + "%" : "");
+        String val = live ? (bpmConf >= 0.30f && bpm >= 50f ? Math.round(bpm) + " BPM · " : "") + Math.round(heldPeak * 100) + "%" : "";
+        float y0 = rowBar(c, l, t, r, b, "Beat peak", val);
         float x0 = l, x1 = r - dp(22);
         paint.setColor(TRACK);
         rect.set(x0, y0, x1, b - dp(4));

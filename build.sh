@@ -1,12 +1,12 @@
 #!/bin/bash
-# Build the light-vibes HMG-API mod on the Mac.
+# Build the light-vibes HMG-API mod on Linux or macOS.
 #
 #   ./build.sh          ARM binaries, settings app, signed dist/ zips
 #   ./build.sh test     also build a host copy and run the analysis on synthetic music
 #
-# Needs: zig (brew install zig), git, python3, openssl, unzip, zip, a JDK, the Android SDK with build-tools
-# and platforms;android-19 (ANDROID_HOME, default: Homebrew's android-commandlinetools), and a checkout of
-# HMG-API (HMGAPI_DIR, default ../HMG-API). The test step also needs numpy.
+# Needs: zig (or pip3 install ziglang), git, python3, openssl, unzip, zip, a JDK, the Android SDK with build-tools
+# and platforms;android-19 (ANDROID_HOME, default: ~/android-sdk or Homebrew's android-commandlinetools), and a checkout of
+# HMG-API (HMGAPI_DIR, default third_party/HMG-API or ../HMG-API). The test step also needs numpy.
 # The mod is signed with ~/.hmgapi/author.key, the app with ~/.hmgapi/light-vibes-app.keystore (made on
 # first build). Keep both: updates need the same keys as the first install.
 # Output binaries are static ARMv7 (musl), so they run on the head unit's Android 4.4 without bionic.
@@ -14,7 +14,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 TINY=third_party/tinyalsa
 TINY_REV=a7cd26a17fe2add2ff38d2f281ed0b919187a068   # tinyalsa master as built and tested on the car (2026-11-01)
-SDK=${ANDROID_HOME:-/opt/homebrew/share/android-commandlinetools}
+if [ -n "${ANDROID_HOME:-}" ]; then SDK=$ANDROID_HOME
+elif [ -d "$HOME/android-sdk" ]; then SDK=$HOME/android-sdk
+else SDK=/opt/homebrew/share/android-commandlinetools; fi
 BT=$(ls -d "$SDK"/build-tools/* | sort -V | tail -1)
 ANDROID_JAR=$SDK/platforms/android-19/android.jar
 AUTHOR_KEY=${HMGAPI_KEY:-$HOME/.hmgapi/author.key}
@@ -48,7 +50,7 @@ echo "== settings app"
 A=build/app
 rm -rf $A
 mkdir -p $A/classes $A/dex $A/assets/presets
-for p in lively marigold contrast pulse3 glow epic speed power efficiency; do cp presets/$p.conf $A/assets/presets/; done
+for p in synesthesia phasepulse drift duet ember nightdrive lively pulse3 epic glow speed power efficiency; do cp presets/$p.conf $A/assets/presets/; done
 javac --release 8 -nowarn -Xlint:-options -cp "$ANDROID_JAR" -d $A/classes app/src/lightvibes/app/*.java
 "$BT/d8" --release --min-api 19 --lib "$ANDROID_JAR" --output $A/dex $(find $A/classes -name '*.class')
 "$BT/aapt" package -f -M app/AndroidManifest.xml -S app/res -A $A/assets -I "$ANDROID_JAR" -F $A/unsigned.apk
@@ -70,21 +72,26 @@ mkdir -p $M/app $M/defaults
 cp mod/mod.json mod/lights.sh mod/open.sh build/lightvibesd $M/
 cp $A/LightVibes.apk $M/app/
 python3 tools/make_icons.py $M/icons
-# defaults until the app has been opened: the lively preset, one value per file
+# defaults until the app has been opened: the synesthesia preset, one value per file
 while IFS='=' read -r k v; do
     case "$k" in ''|\#*) continue ;; esac
     echo "$v" > "$M/defaults/$k"
-done < presets/lively.conf
+done < presets/synesthesia.conf
 python3 tools/sign.py $M dist "$AUTHOR_KEY" "$HMGAPI_DIR"
 
 if [ "${1:-}" = test ]; then
     echo "== host test"
-    # the analysis never calls tinyalsa, whose sources need Linux headers: leave its symbols unresolved
-    cc -O2 -I$TINY/include -o build/lightvibesd-host src/lightvibesd.c -lm -lpthread -Wl,-undefined,dynamic_lookup
-    cc -O1 -I$TINY/include -o build/test_lamp test/test_lamp.c -lm -lpthread -Wl,-undefined,dynamic_lookup
+    # on macOS tinyalsa's Linux headers aren't present, so leave its symbols unresolved; on Linux link tinyalsa directly
+    if [ "$(uname -s)" = Darwin ]; then
+        cc -O2 -I$TINY/include -o build/lightvibesd-host src/lightvibesd.c -lm -lpthread -Wl,-undefined,dynamic_lookup
+        cc -O1 -I$TINY/include -o build/test_lamp test/test_lamp.c -lm -lpthread -Wl,-undefined,dynamic_lookup
+    else
+        cc -O2 -I$TINY/include -o build/lightvibesd-host src/lightvibesd.c $PCM $TINY/src/mixer.c $TINY/src/mixer_hw.c -lm -lpthread
+        cc -O1 -I$TINY/include -Wl,--allow-multiple-definition -o build/test_lamp test/test_lamp.c $PCM $TINY/src/mixer.c $TINY/src/mixer_hw.c -lm -lpthread
+    fi
     build/test_lamp
     mkdir -p build/rt
-    javac --release 8 -nowarn -Xlint:-options -d build/rt app/src/lightvibes/app/QrCode.java app/src/lightvibes/app/Report.java test/ReportTest.java
+    javac --release 8 -nowarn -Xlint:-options -d build/rt app/src/lightvibes/app/Report.java test/ReportTest.java
     java -cp build/rt lightvibes.app.ReportTest
     [ -f build/song.raw ] || python3 test/make_test_audio.py build/song.raw
     beats=$(build/lightvibesd-host --analyze build/song.raw | grep -c BEAT || true)

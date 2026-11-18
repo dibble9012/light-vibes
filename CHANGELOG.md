@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.7.0
+
+### Authors
+- Co-authored by **Kyle ([dibble9012](https://github.com/dibble9012))** and **[lemoyneiv](https://github.com/lemoyneiv)**.
+
+### Material Design 3 interface & presets
+- Full **Material Design 3** split-pane interface tailored for wide 1280×480 Gen5W screens in both Day and Night themes, replacing the tall mode button grid with a compact single-row header, categorized **Mode** sheet, segmented tabs, and M3 Expressive sliders.
+- **Synesthesia** is now the default preset, alongside **Phase Pulse**, **Phase Drift**, **Duet**, **Ember**, **Night Drive**, **Lively**, **Bold Flash**, **Epic**, **Glow**, **Speed**, **Power** and **Efficiency**.
+- Integrated the live **Current Drive** telemetry graph directly into the Material 3 **Tuning** tab for **Speed**, **Power**, **Efficiency** and **Night Drive**.
+
+### New music & hybrid modes
+- **Synesthesia:** maps continuous log-frequency spectral centroid (55 Hz–8 kHz) directly around the vivid colour ring, with a live **Color wheel rotation** slider.
+- **Phase Drift & Phase Pulse:** steps cleanly through curated mood palettes (**Forest & Aurora**, **Cyberpunk**, **Sunset**, **Ocean Deep**) or the **Full Wheel** every **Beats per color** (`2–16` beats), with optional beat-pulse brightness.
+- **Duet:** smooth midrange/vocal **Melody Bed** punctuated by crisp **Beat Accent** flashes in the 180° complementary colour (or any picked colour), with an optional beat-synced **Pair walk** (`Off`, `every beat`, or `2–16 beats`).
+- **Ember:** thermal beat flares with snare/clap transient sparks (250 Hz–8 kHz) re-igniting cooling embers across **Fire**, **Plasma** or **Aurora** gradients.
+- **Night Drive:** fuses EV telemetry (**Motor Power & Regen** or **Vehicle Speed**) for colour with music beat-pulsing brightness, cruising calmly at your telemetry colour when playback pauses.
+
+### Hyundai `0x01xx` stock mood palette & audio DSP
+- Added all 10 official Hyundai `0x01xx` mood-theme stock colours—including Healing Forest emerald green, Mindful Teal, Ocean Blue, Marigold Gold, Vivid Orchid and Dream Purple—tested live on the Hyundai Ioniq 5, plus hue-aware vivid swatch filtering on both Kia and Hyundai.
+- Zero-lag time-domain bandpass beat onset detection, 115 ms minimum Spectrum dwell (preventing LIN lamp mid-fade mud), full `0–10` brightness floor (where `0` blacks out between hits), **Beat pulse** brightness envelope, and 3-band **Auto BPM** tempo tracking with CarPlay track-skip silence reset.
+- RAM-buffered 20-second USB audio/CSV tuning captures (`Light Vibes tuning/`) for zero light jitter during recording.
+
+### USB LED testing & stock color capture
+- Redesigned **LED testing & color capture** (`⋮ > LED testing & color capture`) as a two-card local USB tool (`Light Vibes reports/`):
+  - **15-second LED & brightness test** with live step tracking, on-screen diagnosis, and direct **Save to USB**.
+  - **Capture current** and 1 Hz **Auto-capture** for logging live 16-bit RGB + hex values (`captured-colors.txt`) while tapping swatches in the car's Ambient Light settings or cycling Drive Modes.
+
 ## 0.6.3
 
 - **Kia Niro EV (2023)** is now listed as compatible in the NEMESIS Package Store, and uses the Kia colours.

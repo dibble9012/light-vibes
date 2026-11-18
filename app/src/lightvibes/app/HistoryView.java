@@ -101,7 +101,8 @@ final class HistoryView extends View {
     }
 
     private final Paint line = new Paint(Paint.ANTI_ALIAS_FLAG), guide = new Paint(Paint.ANTI_ALIAS_FLAG),
-            label = new Paint(Paint.ANTI_ALIAS_FLAG), card = new Paint(Paint.ANTI_ALIAS_FLAG);
+            label = new Paint(Paint.ANTI_ALIAS_FLAG), card = new Paint(Paint.ANTI_ALIAS_FLAG),
+            border = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF rect = new RectF();
     private final float density;
     private Drive drive = new Drive();
@@ -119,6 +120,8 @@ final class HistoryView extends View {
         guide.setStyle(Paint.Style.STROKE);
         guide.setStrokeWidth(1 * density);
         guide.setPathEffect(new DashPathEffect(new float[] {4 * density, 4 * density}, 0));
+        border.setStyle(Paint.Style.STROKE);
+        border.setStrokeWidth(1 * density);
         label.setTextSize(12 * density);
     }
 
@@ -139,13 +142,20 @@ final class HistoryView extends View {
     }
 
     @Override protected void onDraw(Canvas c) {
-        float w = getWidth(), h = getHeight(), pad = 8 * density;
-        card.setColor(CARD);
-        rect.set(0, 0, w, h);
-        c.drawRoundRect(rect, 8 * density, 8 * density, card);
+        float w = getWidth(), h = getHeight(), pad = 8 * density, half = 0.5f * density;
+        card.setColor(SURFACE_LOW);
+        border.setColor(RULE);
+        rect.set(half, half, w - half, h - half);
+        c.drawRoundRect(rect, 12 * density, 12 * density, card);
+        c.drawRoundRect(rect, 12 * density, 12 * density, border);
         Drive d = drive;
         int n = d.n;
-        if (n < 2 || colours == null || reading == null) return;
+        if (n < 2 || colours == null || reading == null) {
+            label.setColor(MUTED);
+            label.setTextAlign(Paint.Align.CENTER);
+            c.drawText("Fills in live once the car is READY", w / 2f, h / 2f + 4 * density, label);
+            return;
+        }
 
         float left = 54 * density, right = w - pad, top = pad, bottom = h - 20 * density;
         long t0 = d.t[0], t1 = d.t[n - 1]; if (t1 <= t0) t1 = t0 + 1;
