@@ -1,17 +1,13 @@
 package lightvibes.app;
 
-import java.io.UnsupportedEncodingException;
-import java.net.URLEncoder;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Turns the lamp test's result into words for the owner and a link for a GitHub issue. No Android classes:
- * test/ReportTest.java runs it on the Mac. Only what's named here leaves the car, and only when the owner scans the code.
+ * Turns the lamp test's result into a clear human-readable verdict for on-screen display and USB diagnostic logs.
+ * No Android classes: test/ReportTest.java runs it on the host.
  */
 final class Report {
-    private static final String ISSUE = "https://github.com/dibble9012/light-vibes/issues/new?template=problem.yml";
-
     final String heading, detail;
 
     private final Map<String, String> r;
@@ -56,7 +52,7 @@ final class Report {
             return new String[] {"no service", "The Light Vibes service didn't answer",
                     "Nothing was tested. Check that Light Vibes is on in HMG-API, restart the head unit, and try again."};
         }
-        String restored = "1".equals(r.get("restored")) ? "" : "\n\nThe lamp didn't confirm your colour came back. If it looks wrong, set it again in Settings > Vehicle > Lights > Ambient light.";
+        String restored = "1".equals(r.get("restored")) ? "" : "\n\nThe lamp didn't confirm your color came back. If it looks wrong, set it again in Settings > Vehicle > Lights > Ambient light.";
         if ("missing".equals(r.get("svc"))) {
             return new String[] {"no lamp service", "This head unit has no lamp service",
                     "The service Light Vibes uses to control the light doesn't exist on this head unit, so it needs adding for your car." + restored};
@@ -73,7 +69,7 @@ final class Report {
         } else if (!c && all("c") || !b && all("b")) {
             d.append("The car reported the change, but you didn't see it. The light itself may be set differently, or this car may use another control.");
         } else {
-            if (!c && none("c")) d.append("The lamp ignored the test colours. This car may use different factory colours.");
+            if (!c && none("c")) d.append("The lamp ignored the test factory colours.");
             if (!b && !all("b")) d.append(d.length() > 0 ? " " : "").append("The lamp didn't take the test brightness levels.");
             if (d.length() == 0) d.append("The lamp took only some of the test values.");
         }
@@ -86,10 +82,9 @@ final class Report {
             return "The light responds, and no music has reached Light Vibes since the head unit started. Play music, then run this again if the lights don't follow it.";
         }
         return "The light responds. The loudest music Light Vibes has heard is " + peak + " dB, and it treats anything under " + get("silence")
-                + " dB as silence. If the lights still don't follow the music, send this report.";
+                + " dB as silence. You can save the full diagnostic log to a USB drive below.";
     }
 
-    /** What goes in the issue: short, because it has to fit a QR code a phone can read off the screen. */
     String summary() {
         StringBuilder s = new StringBuilder();
         s.append("LV ").append(get("v")).append(" HMG ").append(get("hmg")).append('\n');
@@ -109,22 +104,5 @@ final class Report {
         String product = get("product");
         int dot = product.indexOf('.');
         return kind + (dot > 0 ? " on " + product.substring(0, dot) : "");
-    }
-
-    String issueUrl() {
-        String sum = summary();
-        String url = link(sum);
-        if (url.length() > 700) {       // many other mods: their names are in the full report anyway
-            url = link(sum.substring(0, sum.lastIndexOf('\n')));
-        }
-        return url;
-    }
-
-    private String link(String sum) {
-        try {
-            return ISSUE + "&title=" + URLEncoder.encode(title(), "UTF-8") + "&summary=" + URLEncoder.encode(sum, "UTF-8");
-        } catch (UnsupportedEncodingException e) {
-            return ISSUE;
-        }
     }
 }

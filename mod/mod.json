@@ -1,9 +1,9 @@
 {
   "id": "light-vibes",
   "name": "Light Vibes",
-  "version": "0.6.3",
+  "version": "0.7.0",
   "hmgapi": ">=1.0.0",
-  "authors": ["Kyle"],
+  "authors": ["Kyle (dibble9012)", "lemoyneiv"],
   "license": "AGPL-3.0",
   "description": "Makes the ambient lighting follow the music from CarPlay and the head unit's Android audio: colour and brightness react to beats and frequency bands. No microphone, and nothing in CarPlay is changed. AM/FM radio and SiriusXM are not supported. Pick presets and colours in the Light Vibes app, or have the colour follow your speed instead. Supports Kia EV6, Kia Niro EV (2023), Hyundai Ioniq 5, and Hyundai Ioniq 6 (US Gen5W).",
   "live": true,
